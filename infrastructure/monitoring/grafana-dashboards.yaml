@@ -1,0 +1,372 @@
+# Grafana Dashboard Configurations for TradeMate Tier-Specific Monitoring
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  gridworks-overview.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "TradeMate Production Overview",
+        "tags": ["gridworks", "production", "overview"],
+        "timezone": "Asia/Kolkata",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Tier Performance Comparison",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{tier=\"shared\"}[5m])) by (le))",
+                "legendFormat": "Shared P95",
+                "refId": "A"
+              },
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{tier=\"premium\"}[5m])) by (le))",
+                "legendFormat": "Premium P95",
+                "refId": "B"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "s",
+                "thresholds": {
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "yellow", "value": 0.05},
+                    {"color": "red", "value": 0.1}
+                  ]
+                }
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Request Rate by Tier",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{tier=\"shared\"}[5m]))",
+                "legendFormat": "Shared Tier RPS",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(http_requests_total{tier=\"premium\"}[5m]))",
+                "legendFormat": "Premium Tier RPS",
+                "refId": "B"
+              }
+            ],
+            "yAxes": [
+              {"label": "Requests/sec", "min": 0}
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Error Rate by Tier",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{status=~\"5..\",tier=\"shared\"}[5m])) / sum(rate(http_requests_total{tier=\"shared\"}[5m]))",
+                "legendFormat": "Shared Error Rate",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(http_requests_total{status=~\"5..\",tier=\"premium\"}[5m])) / sum(rate(http_requests_total{tier=\"premium\"}[5m]))",
+                "legendFormat": "Premium Error Rate",
+                "refId": "B"
+              }
+            ],
+            "yAxes": [
+              {"label": "Error Rate", "min": 0, "max": 1}
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s"
+      }
+    }
+    
+  shared-tier-performance.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Shared Tier Performance (LITE + PRO)",
+        "tags": ["gridworks", "shared", "performance"],
+        "timezone": "Asia/Kolkata",
+        "panels": [
+          {
+            "id": 1,
+            "title": "API Response Time (SLA: <100ms)",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{tier=\"shared\"}[5m])) by (le))",
+                "legendFormat": "P50",
+                "refId": "A"
+              },
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{tier=\"shared\"}[5m])) by (le))",
+                "legendFormat": "P95 (SLA)",
+                "refId": "B"
+              },
+              {
+                "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{tier=\"shared\"}[5m])) by (le))",
+                "legendFormat": "P99",
+                "refId": "C"
+              }
+            ],
+            "yAxes": [
+              {"label": "Response Time (s)", "min": 0}
+            ],
+            "alert": {
+              "conditions": [
+                {
+                  "query": {"queryType": "", "refId": "B"},
+                  "reducer": {"params": [], "type": "last"},
+                  "evaluator": {"params": [0.1], "type": "gt"}
+                }
+              ],
+              "executionErrorState": "alerting",
+              "for": "2m",
+              "frequency": "30s",
+              "handler": 1,
+              "name": "Shared Tier SLA Breach",
+              "noDataState": "no_data"
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Throughput & Capacity",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(http_requests_total{tier=\"shared\"}[5m]))",
+                "legendFormat": "Current RPS",
+                "refId": "A"
+              },
+              {
+                "expr": "avg(kube_deployment_spec_replicas{deployment=\"gridworks-shared-api\"}) * 100",
+                "legendFormat": "Capacity (est)",
+                "refId": "B"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Resource Utilization",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "avg(rate(container_cpu_usage_seconds_total{tier=\"shared\"}[5m])) * 100",
+                "legendFormat": "CPU %",
+                "refId": "A"
+              },
+              {
+                "expr": "avg(container_memory_usage_bytes{tier=\"shared\"}) / avg(container_spec_memory_limit_bytes{tier=\"shared\"}) * 100",
+                "legendFormat": "Memory %",
+                "refId": "B"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+          }
+        ],
+        "time": {
+          "from": "now-6h",
+          "to": "now"
+        },
+        "refresh": "15s"
+      }
+    }
+    
+  premium-tier-performance.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Premium Tier Performance (Elite + Black)",
+        "tags": ["gridworks", "premium", "elite", "black"],
+        "timezone": "Asia/Kolkata",
+        "panels": [
+          {
+            "id": 1,
+            "title": "API Response Time (SLA: <50ms)",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{tier=\"premium\"}[2m])) by (le))",
+                "legendFormat": "P50",
+                "refId": "A"
+              },
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{tier=\"premium\"}[2m])) by (le))",
+                "legendFormat": "P95 (SLA)",
+                "refId": "B"
+              },
+              {
+                "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{tier=\"premium\"}[2m])) by (le))",
+                "legendFormat": "P99",
+                "refId": "C"
+              }
+            ],
+            "yAxes": [
+              {"label": "Response Time (s)", "min": 0, "max": 0.1}
+            ],
+            "alert": {
+              "conditions": [
+                {
+                  "query": {"queryType": "", "refId": "B"},
+                  "reducer": {"params": [], "type": "last"},
+                  "evaluator": {"params": [0.05], "type": "gt"}
+                }
+              ],
+              "executionErrorState": "alerting",
+              "for": "1m",
+              "frequency": "15s",
+              "handler": 1,
+              "name": "Premium Tier SLA Breach",
+              "noDataState": "alerting"
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Colocation Performance",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "avg(ping_rtt_ms{target=~\"nse.*\"})",
+                "legendFormat": "NSE Latency",
+                "refId": "A"
+              },
+              {
+                "expr": "avg(ping_rtt_ms{target=~\"bse.*\"})",
+                "legendFormat": "BSE Latency",
+                "refId": "B"
+              }
+            ],
+            "yAxes": [
+              {"label": "Latency (ms)", "min": 0, "max": 10}
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Institutional Features Performance",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(institutional_orders_total[2m])",
+                "legendFormat": "Institutional Orders/sec",
+                "refId": "A"
+              },
+              {
+                "expr": "avg(institutional_order_latency_seconds)",
+                "legendFormat": "Order Latency",
+                "refId": "B"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "10s"
+      }
+    }
+    
+  business-metrics.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "TradeMate Business Metrics",
+        "tags": ["gridworks", "business", "revenue"],
+        "timezone": "Asia/Kolkata",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Active Users by Tier",
+            "type": "pie",
+            "targets": [
+              {
+                "expr": "sum(active_users{tier=\"lite\"})",
+                "legendFormat": "LITE",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(active_users{tier=\"pro\"})",
+                "legendFormat": "PRO",
+                "refId": "B"
+              },
+              {
+                "expr": "sum(active_users{tier=\"elite\"})",
+                "legendFormat": "Elite",
+                "refId": "C"
+              },
+              {
+                "expr": "sum(active_users{tier=\"black\"})",
+                "legendFormat": "Black",
+                "refId": "D"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Revenue by Tier (₹)",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(revenue_total{tier=\"shared\"}[1h]))",
+                "legendFormat": "Shared (LITE+PRO)",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(revenue_total{tier=\"premium\"}[1h]))",
+                "legendFormat": "Premium (Elite+Black)",
+                "refId": "B"
+              }
+            ],
+            "yAxes": [
+              {"label": "Revenue/hour (₹)", "min": 0}
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Trading Volume & Frequency",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(trades_total[5m]))",
+                "legendFormat": "Trades/sec",
+                "refId": "A"
+              },
+              {
+                "expr": "sum(rate(trade_volume_total[5m]))",
+                "legendFormat": "Volume ₹/sec",
+                "refId": "B"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+          }
+        ],
+        "time": {
+          "from": "now-24h",
+          "to": "now"
+        },
+        "refresh": "1m"
+      }
+    }

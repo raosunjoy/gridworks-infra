@@ -1,0 +1,447 @@
+# TradeMate Security Hardening Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: security-hardening-config
+  namespace: security
+data:
+  # Network security policies
+  network-policies.yaml: |
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: shared-tier-network-policy
+      namespace: shared
+    spec:
+      podSelector:
+        matchLabels:
+          tier: shared
+      policyTypes:
+      - Ingress
+      - Egress
+      ingress:
+      - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+        - podSelector:
+            matchLabels:
+              app: smart-router
+        ports:
+        - protocol: TCP
+          port: 8000
+      egress:
+      - to:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+        ports:
+        - protocol: TCP
+          port: 9090
+      - to: []
+        ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+    ---
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: premium-tier-network-policy
+      namespace: premium
+    spec:
+      podSelector:
+        matchLabels:
+          tier: premium
+      policyTypes:
+      - Ingress
+      - Egress
+      ingress:
+      - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+        - podSelector:
+            matchLabels:
+              app: smart-router
+        ports:
+        - protocol: TCP
+          port: 8000
+      - from:
+        - podSelector:
+            matchLabels:
+              component: colocation
+        ports:
+        - protocol: TCP
+          port: 9000
+      egress:
+      - to:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+        ports:
+        - protocol: TCP
+          port: 9090
+      - to: []
+        ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+          
+  # Pod security policies
+  pod-security-policies.yaml: |
+    apiVersion: policy/v1beta1
+    kind: PodSecurityPolicy
+    metadata:
+      name: gridworks-shared-psp
+    spec:
+      privileged: false
+      allowPrivilegeEscalation: false
+      requiredDropCapabilities:
+        - ALL
+      volumes:
+        - 'configMap'
+        - 'emptyDir'
+        - 'projected'
+        - 'secret'
+        - 'downwardAPI'
+        - 'persistentVolumeClaim'
+      runAsUser:
+        rule: 'MustRunAsNonRoot'
+      seLinux:
+        rule: 'RunAsAny'
+      fsGroup:
+        rule: 'RunAsAny'
+    ---
+    apiVersion: policy/v1beta1
+    kind: PodSecurityPolicy
+    metadata:
+      name: gridworks-premium-psp
+    spec:
+      privileged: false
+      allowPrivilegeEscalation: false
+      requiredDropCapabilities:
+        - ALL
+      allowedCapabilities:
+        - NET_BIND_SERVICE
+      volumes:
+        - 'configMap'
+        - 'emptyDir'
+        - 'projected'
+        - 'secret'
+        - 'downwardAPI'
+        - 'persistentVolumeClaim'
+      runAsUser:
+        rule: 'MustRunAsNonRoot'
+      seLinux:
+        rule: 'RunAsAny'
+      fsGroup:
+        rule: 'RunAsAny'
+        
+  # Security contexts
+  security-contexts.yaml: |
+    # Shared tier security context
+    shared:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containerSecurityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 1000
+        capabilities:
+          drop:
+          - ALL
+          add:
+          - NET_BIND_SERVICE
+    # Premium tier security context (enhanced)
+    premium:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 2000
+        runAsGroup: 2000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+      containerSecurityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 2000
+        capabilities:
+          drop:
+          - ALL
+          add:
+          - NET_BIND_SERVICE
+          
+  # RBAC policies
+  rbac-policies.yaml: |
+    # Shared tier service account
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: shared-api-sa
+      namespace: shared
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      namespace: shared
+      name: shared-api-role
+    rules:
+    - apiGroups: [""]
+      resources: ["configmaps", "secrets"]
+      verbs: ["get", "list"]
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get", "list", "watch"]
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: shared-api-binding
+      namespace: shared
+    subjects:
+    - kind: ServiceAccount
+      name: shared-api-sa
+      namespace: shared
+    roleRef:
+      kind: Role
+      name: shared-api-role
+      apiGroup: rbac.authorization.k8s.io
+    ---
+    # Premium tier service account (more restrictive)
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: premium-api-sa
+      namespace: premium
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      namespace: premium
+      name: premium-api-role
+    rules:
+    - apiGroups: [""]
+      resources: ["configmaps"]
+      verbs: ["get"]
+      resourceNames: ["premium-config"]
+    - apiGroups: [""]
+      resources: ["secrets"]
+      verbs: ["get"]
+      resourceNames: ["premium-secrets"]
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: premium-api-binding
+      namespace: premium
+    subjects:
+    - kind: ServiceAccount
+      name: premium-api-sa
+      namespace: premium
+    roleRef:
+      kind: Role
+      name: premium-api-role
+      apiGroup: rbac.authorization.k8s.io
+      
+  # Secrets management
+  secrets-management.yaml: |
+    # External Secrets Operator configuration
+    apiVersion: external-secrets.io/v1beta1
+    kind: SecretStore
+    metadata:
+      name: aws-secrets-manager
+      namespace: shared
+    spec:
+      provider:
+        aws:
+          service: SecretsManager
+          region: ap-south-1
+          auth:
+            secretRef:
+              accessKeyID:
+                name: aws-credentials
+                key: access-key-id
+              secretAccessKey:
+                name: aws-credentials
+                key: secret-access-key
+    ---
+    apiVersion: external-secrets.io/v1beta1
+    kind: ExternalSecret
+    metadata:
+      name: shared-database-secret
+      namespace: shared
+    spec:
+      refreshInterval: 1h
+      secretStoreRef:
+        name: aws-secrets-manager
+        kind: SecretStore
+      target:
+        name: shared-db-credentials
+        creationPolicy: Owner
+      data:
+      - secretKey: database-url
+        remoteRef:
+          key: gridworks/shared/database
+          property: connection_string
+      - secretKey: username
+        remoteRef:
+          key: gridworks/shared/database
+          property: username
+      - secretKey: password
+        remoteRef:
+          key: gridworks/shared/database
+          property: password
+    ---
+    # Premium tier secrets (separate key hierarchy)
+    apiVersion: external-secrets.io/v1beta1
+    kind: ExternalSecret
+    metadata:
+      name: premium-database-secret
+      namespace: premium
+    spec:
+      refreshInterval: 30m  # More frequent rotation for premium
+      secretStoreRef:
+        name: aws-secrets-manager
+        kind: SecretStore
+      target:
+        name: premium-db-credentials
+        creationPolicy: Owner
+      data:
+      - secretKey: database-url
+        remoteRef:
+          key: gridworks/premium/database
+          property: connection_string
+      - secretKey: username
+        remoteRef:
+          key: gridworks/premium/database
+          property: username
+      - secretKey: password
+        remoteRef:
+          key: gridworks/premium/database
+          property: password
+      - secretKey: encryption-key
+        remoteRef:
+          key: gridworks/premium/encryption
+          property: master_key
+---
+# Security hardening deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-hardening-controller
+  namespace: security
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: security-hardening
+  template:
+    metadata:
+      labels:
+        app: security-hardening
+    spec:
+      serviceAccountName: security-hardening-sa
+      containers:
+      - name: security-controller
+        image: gridworks/security-hardening:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Starting TradeMate Security Hardening Controller"
+          
+          # Apply network policies
+          kubectl apply -f /config/network-policies.yaml
+          
+          # Apply pod security policies
+          kubectl apply -f /config/pod-security-policies.yaml
+          
+          # Apply RBAC policies
+          kubectl apply -f /config/rbac-policies.yaml
+          
+          # Setup secrets management
+          kubectl apply -f /config/secrets-management.yaml
+          
+          # Start continuous security monitoring
+          python3 /scripts/security-monitor.py
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: scripts
+          mountPath: /scripts
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 3000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+      volumes:
+      - name: config
+        configMap:
+          name: security-hardening-config
+      - name: scripts
+        configMap:
+          name: security-scripts
+          defaultMode: 0755
+---
+# Security hardening service account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: security-hardening-sa
+  namespace: security
+---
+# ClusterRole for security hardening
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: security-hardening-role
+rules:
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies"]
+  verbs: ["get", "list", "create", "update", "patch"]
+- apiGroups: ["policy"]
+  resources: ["podsecuritypolicies"]
+  verbs: ["get", "list", "create", "update", "patch"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["roles", "rolebindings"]
+  verbs: ["get", "list", "create", "update", "patch"]
+- apiGroups: ["external-secrets.io"]
+  resources: ["externalsecrets", "secretstores"]
+  verbs: ["get", "list", "create", "update", "patch"]
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps"]
+  verbs: ["get", "list", "watch"]
+---
+# ClusterRoleBinding for security hardening
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: security-hardening-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: security-hardening-role
+subjects:
+- kind: ServiceAccount
+  name: security-hardening-sa
+  namespace: security

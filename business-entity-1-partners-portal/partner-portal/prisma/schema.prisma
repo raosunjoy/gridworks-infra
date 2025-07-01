@@ -1,0 +1,222 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  password      String?
+  role          String    @default("PARTNER")
+  status        String    @default("ACTIVE")
+  companyName   String?   @map("company_name")
+  partnerId     String?   @map("partner_id")
+  permissions   String?   @default("{}")
+  
+  // Audit fields
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  lastLoginAt   DateTime? @map("last_login_at")
+  
+  // Relationships
+  accounts      Account[]
+  sessions      Session[]
+  partner       Partner?  @relation(fields: [partnerId], references: [id])
+  activities    Activity[]
+  apiKeys       ApiKey[]
+
+  @@map("users")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verificationtokens")
+}
+
+model Partner {
+  id              String   @id @default(cuid())
+  companyName     String   @unique @map("company_name")
+  tier            String   @default("LITE")
+  status          String   @default("PENDING")
+  companySize     String?  @map("company_size")
+  industry        String?
+  website         String?
+  description     String?
+  businessType    String?  @map("business_type")
+  
+  // Contact Information
+  contactName     String   @map("contact_name")
+  contactEmail    String   @map("contact_email")
+  contactPhone    String?  @map("contact_phone")
+  
+  // Address
+  address         String?
+  city            String?
+  state           String?
+  country         String   @default("IN")
+  postalCode      String?  @map("postal_code")
+  
+  // Legal
+  panNumber       String?  @unique @map("pan_number")
+  gstNumber       String?  @unique @map("gst_number")
+  cinNumber       String?  @unique @map("cin_number")
+  
+  // Audit fields
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  approvedAt      DateTime? @map("approved_at")
+  approvedBy      String?  @map("approved_by")
+  
+  // Relationships
+  users           User[]
+  apiKeys         ApiKey[]
+  subscriptions   Subscription[]
+  activities      Activity[]
+
+  @@map("partners")
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  name        String
+  key         String    @unique
+  secret      String
+  partnerId   String    @map("partner_id")
+  userId      String    @map("user_id")
+  
+  // Configuration
+  scopes      String    @default("[]") // JSON string array
+  environment String    @default("SANDBOX")
+  
+  // Usage
+  isActive    Boolean   @default(true) @map("is_active")
+  lastUsedAt  DateTime? @map("last_used_at")
+  
+  // Rate limiting
+  rateLimit   Int       @default(1000) @map("rate_limit")
+  usageCount  Int       @default(0) @map("usage_count")
+  
+  // Security
+  expiresAt    DateTime? @map("expires_at")
+  ipWhitelist  String    @default("[]") @map("ip_whitelist") // JSON string array
+  
+  // Audit fields
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  
+  // Relationships
+  partner     Partner   @relation(fields: [partnerId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@map("api_keys")
+}
+
+model Subscription {
+  id              String    @id @default(cuid())
+  partnerId       String    @map("partner_id")
+  
+  // Plan details
+  planName        String    @map("plan_name")
+  tier            String    @default("LITE")
+  
+  // Pricing
+  monthlyPrice    Float?     @map("monthly_price")
+  yearlyPrice     Float?     @map("yearly_price")
+  customPrice     Float?     @map("custom_price")
+  
+  // Billing
+  billingCycle    String    @default("MONTHLY") @map("billing_cycle")
+  status          String    @default("ACTIVE")
+  
+  // Usage limits
+  requestLimit    Int       @default(10000) @map("request_limit")
+  userLimit       Int       @default(5) @map("user_limit")
+  
+  // Features (JSON strings)
+  features        String    @default("[]")
+  addOns          String    @default("[]") @map("add_ons")
+  
+  // Dates
+  startDate       DateTime  @default(now()) @map("start_date")
+  endDate         DateTime? @map("end_date")
+  trialEndsAt     DateTime? @map("trial_ends_at")
+  canceledAt      DateTime? @map("canceled_at")
+  
+  // Payment
+  stripeCustomerId      String?  @map("stripe_customer_id")
+  stripeSubscriptionId  String?  @unique @map("stripe_subscription_id")
+  
+  // Audit fields
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  
+  // Relationships
+  partner         Partner  @relation(fields: [partnerId], references: [id])
+
+  @@map("subscriptions")
+}
+
+model Activity {
+  id          String    @id @default(cuid())
+  type        String
+  userId      String?   @map("user_id")
+  partnerId   String?   @map("partner_id")
+  title       String
+  description String?
+  metadata    String?   @default("{}")
+  ipAddress   String?   @map("ip_address")
+  userAgent   String?   @map("user_agent")
+  
+  // Audit fields
+  createdAt   DateTime  @default(now()) @map("created_at")
+  
+  // Relationships
+  user        User?     @relation(fields: [userId], references: [id])
+  partner     Partner?  @relation(fields: [partnerId], references: [id])
+
+  @@map("activities")
+}

@@ -1,0 +1,530 @@
+name: TradeMate Production CI/CD Pipeline
+on:
+  push:
+    branches: [ master, develop ]
+  pull_request:
+    branches: [ master ]
+    
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: trademate
+  AWS_REGION: ap-south-1
+  EKS_CLUSTER_NAME: trademate-production
+
+jobs:
+  # ==============================================
+  # TESTING & VALIDATION
+  # ==============================================
+  test-institutional:
+    name: Test Institutional Features
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio redis fastapi uvicorn pydantic numpy pandas PyJWT
+          pip install -r requirements.txt
+          
+      - name: Run institutional tests
+        run: |
+          cd tests
+          python run_institutional_tests.py
+          
+      - name: Validate Phase 2B.3 components
+        run: |
+          python -m pytest tests/test_institutional_simple.py -v
+          
+  test-infrastructure:
+    name: Validate Infrastructure Config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.6.0
+          
+      - name: Terraform validate
+        run: |
+          cd infrastructure
+          terraform init -backend=false
+          terraform validate
+          
+      - name: Validate Kubernetes manifests
+        uses: azure/k8s-lint@v1
+        with:
+          manifests: |
+            infrastructure/k8s/shared-tier.yaml
+            infrastructure/k8s/premium-tier.yaml
+            infrastructure/k8s/smart-router.yaml
+
+  security-scan:
+    name: Security & Compliance Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run security scan
+        uses: securecodewarrior/github-action-add-sarif@v1
+        with:
+          sarif-file: 'security-scan-results.sarif'
+          
+      - name: Python security check
+        run: |
+          pip install bandit safety
+          bandit -r app/ -f json -o bandit-report.json
+          safety check --json --output safety-report.json
+          
+      - name: Infrastructure security scan
+        run: |
+          # Scan Terraform files for security issues
+          docker run --rm -v $(pwd):/data bridgecrew/checkov -d /data/infrastructure --framework terraform
+
+  # ==============================================
+  # BUILD & CONTAINER IMAGES
+  # ==============================================
+  build-shared-tier:
+    name: Build Shared Tier Images
+    runs-on: ubuntu-latest
+    needs: [test-institutional, test-infrastructure, security-scan]
+    if: github.ref == 'refs/heads/master'
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/shared-api
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+            
+      - name: Build and push shared tier image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.shared
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            TIER=shared
+            PERFORMANCE_TARGET=100ms
+            
+  build-premium-tier:
+    name: Build Premium Tier Images
+    runs-on: ubuntu-latest
+    needs: [test-institutional, test-infrastructure, security-scan]
+    if: github.ref == 'refs/heads/master'
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/premium-api
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr  
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+            
+      - name: Build and push premium tier image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.premium
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            TIER=premium
+            PERFORMANCE_TARGET=50ms
+            INSTITUTIONAL_FEATURES=true
+
+  # ==============================================
+  # STAGING DEPLOYMENT
+  # ==============================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build-shared-tier, build-premium-tier]
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name trademate-staging
+          
+      - name: Deploy to staging shared tier
+        run: |
+          kubectl set image deployment/trademate-shared-api \
+            api-server=${{ env.REGISTRY }}/${{ github.repository }}/shared-api:${{ github.sha }} \
+            -n shared-staging
+          kubectl rollout status deployment/trademate-shared-api -n shared-staging --timeout=300s
+          
+      - name: Deploy to staging premium tier
+        run: |
+          kubectl set image deployment/trademate-premium-api \
+            premium-api-server=${{ env.REGISTRY }}/${{ github.repository }}/premium-api:${{ github.sha }} \
+            -n premium-staging
+          kubectl rollout status deployment/trademate-premium-api -n premium-staging --timeout=300s
+          
+      - name: Run staging health checks
+        run: |
+          # Shared tier health check
+          kubectl wait --for=condition=ready pod -l app=shared-api -n shared-staging --timeout=120s
+          
+          # Premium tier health check  
+          kubectl wait --for=condition=ready pod -l app=premium-api -n premium-staging --timeout=120s
+          
+          # Performance validation
+          curl -f https://staging-shared.trademate.ai/health
+          curl -f https://staging-premium.trademate.ai/health
+
+  # ==============================================
+  # PRODUCTION DEPLOYMENT (BLUE-GREEN)
+  # ==============================================
+  deploy-production-shared:
+    name: Deploy Shared Tier to Production
+    runs-on: ubuntu-latest
+    needs: [build-shared-tier]
+    if: github.ref == 'refs/heads/master'
+    environment: production-shared
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+          
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x /usr/local/bin/argocd
+          
+      - name: Blue-Green deployment for shared tier
+        run: |
+          # Update image in ArgoCD application
+          argocd app set trademate-shared-production \
+            --parameter image.tag=${{ github.sha }} \
+            --parameter deployment.strategy=blue-green
+            
+          # Sync application
+          argocd app sync trademate-shared-production
+          
+          # Wait for sync completion
+          argocd app wait trademate-shared-production --timeout 600
+          
+      - name: Validate shared tier deployment
+        run: |
+          # Health check on green environment
+          kubectl wait --for=condition=ready pod \
+            -l app=shared-api,version=green \
+            -n shared --timeout=300s
+            
+          # Performance test on green environment
+          ENDPOINT=$(kubectl get service shared-api-preview -n shared -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          curl -f https://$ENDPOINT/health
+          
+          # Load test (basic)
+          for i in {1..100}; do
+            curl -s https://$ENDPOINT/api/v1/health > /dev/null &
+          done
+          wait
+          
+      - name: Promote to live traffic
+        run: |
+          # Promote green to blue (live traffic)
+          argocd app action run trademate-shared-production promote --kind Rollout --resource-name shared-api-rollout
+          
+          # Verify promotion
+          kubectl rollout status rollout/shared-api-rollout -n shared --timeout=300s
+          
+      - name: Post-deployment validation
+        run: |
+          # Final health check
+          curl -f https://api.trademate.ai/health
+          
+          # Performance validation
+          response_time=$(curl -o /dev/null -s -w '%{time_total}' https://api.trademate.ai/health)
+          if (( $(echo "$response_time > 0.1" | bc -l) )); then
+            echo "Response time $response_time exceeds 100ms SLA"
+            exit 1
+          fi
+
+  deploy-production-premium:
+    name: Deploy Premium Tier to Production
+    runs-on: ubuntu-latest
+    needs: [build-premium-tier, deploy-production-shared]
+    if: github.ref == 'refs/heads/master'
+    environment: production-premium
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+          
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x /usr/local/bin/argocd
+          
+      - name: Blue-Green deployment for premium tier
+        run: |
+          # Update image in ArgoCD application
+          argocd app set trademate-premium-production \
+            --parameter image.tag=${{ github.sha }} \
+            --parameter deployment.strategy=blue-green
+            
+          # Sync application
+          argocd app sync trademate-premium-production
+          
+          # Wait for sync completion  
+          argocd app wait trademate-premium-production --timeout 600
+          
+      - name: Validate premium tier deployment
+        run: |
+          # Health check on green environment
+          kubectl wait --for=condition=ready pod \
+            -l app=premium-api,version=green \
+            -n premium --timeout=300s
+            
+          # Premium tier performance test
+          ENDPOINT=$(kubectl get service premium-api-preview -n premium -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          curl -f https://$ENDPOINT/health
+          
+          # Premium performance validation (stricter SLA)
+          response_time=$(curl -o /dev/null -s -w '%{time_total}' https://$ENDPOINT/health)
+          if (( $(echo "$response_time > 0.05" | bc -l) )); then
+            echo "Premium response time $response_time exceeds 50ms SLA"
+            exit 1
+          fi
+          
+      - name: Premium tier manual approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: trademate-platform-team
+          minimum-approvals: 2
+          issue-title: "Premium Tier Deployment Approval Required"
+          issue-body: |
+            **Premium Tier Deployment Ready for Approval**
+            
+            - **Commit**: ${{ github.sha }}
+            - **Performance**: Response time validated <50ms
+            - **Health Checks**: All systems operational
+            - **Premium Features**: Institutional API, HNI portfolio, risk management
+            
+            Please review and approve the premium tier deployment.
+            
+      - name: Promote premium to live traffic
+        run: |
+          # Promote green to blue (live traffic)
+          argocd app action run trademate-premium-production promote --kind Rollout --resource-name premium-api-rollout
+          
+          # Verify promotion
+          kubectl rollout status rollout/premium-api-rollout -n premium --timeout=300s
+          
+      - name: Premium post-deployment validation
+        run: |
+          # Final health check
+          curl -f https://premium.trademate.ai/health
+          
+          # Institutional features validation
+          curl -f https://premium.trademate.ai/api/v1/institutional/health
+          
+          # Performance validation (strict)
+          response_time=$(curl -o /dev/null -s -w '%{time_total}' https://premium.trademate.ai/health)
+          if (( $(echo "$response_time > 0.05" | bc -l) )); then
+            echo "Premium production response time $response_time exceeds 50ms SLA"
+            exit 1
+          fi
+
+  # ==============================================
+  # ROLLBACK PROCEDURES
+  # ==============================================
+  rollback-shared:
+    name: Rollback Shared Tier
+    runs-on: ubuntu-latest
+    if: failure() && github.ref == 'refs/heads/master'
+    needs: [deploy-production-shared]
+    steps:
+      - name: Emergency rollback shared tier
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+          
+          # Rollback to previous version
+          argocd app rollback trademate-shared-production
+          
+          # Verify rollback
+          kubectl rollout status rollout/shared-api-rollout -n shared --timeout=300s
+          
+          # Health check after rollback
+          curl -f https://api.trademate.ai/health
+
+  rollback-premium:
+    name: Rollback Premium Tier  
+    runs-on: ubuntu-latest
+    if: failure() && github.ref == 'refs/heads/master'
+    needs: [deploy-production-premium]
+    steps:
+      - name: Emergency rollback premium tier
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+          
+          # Rollback to previous version
+          argocd app rollback trademate-premium-production
+          
+          # Verify rollback
+          kubectl rollout status rollout/premium-api-rollout -n premium --timeout=300s
+          
+          # Health check after rollback
+          curl -f https://premium.trademate.ai/health
+
+  # ==============================================
+  # NOTIFICATIONS & MONITORING
+  # ==============================================
+  notify-deployment:
+    name: Deployment Notifications
+    runs-on: ubuntu-latest
+    needs: [deploy-production-shared, deploy-production-premium]
+    if: always()
+    steps:
+      - name: Slack notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#trademate-deployments'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+          custom_payload: |
+            {
+              "text": "TradeMate Production Deployment",
+              "attachments": [{
+                "color": "${{ job.status == 'success' && 'good' || 'danger' }}",
+                "fields": [{
+                  "title": "Deployment Status",
+                  "value": "${{ job.status }}",
+                  "short": true
+                }, {
+                  "title": "Commit",
+                  "value": "${{ github.sha }}",
+                  "short": true
+                }, {
+                  "title": "Shared Tier",
+                  "value": "${{ needs.deploy-production-shared.result }}",
+                  "short": true
+                }, {
+                  "title": "Premium Tier", 
+                  "value": "${{ needs.deploy-production-premium.result }}",
+                  "short": true
+                }]
+              }]
+            }
+            
+      - name: Update deployment status
+        run: |
+          # Update deployment tracking
+          echo "Deployment completed at $(date)" >> deployment-log.txt
+          echo "Shared tier: ${{ needs.deploy-production-shared.result }}" >> deployment-log.txt
+          echo "Premium tier: ${{ needs.deploy-production-premium.result }}" >> deployment-log.txt
+          
+      - name: Performance metrics collection
+        run: |
+          # Collect post-deployment metrics
+          SHARED_RESPONSE=$(curl -o /dev/null -s -w '%{time_total}' https://api.trademate.ai/health)
+          PREMIUM_RESPONSE=$(curl -o /dev/null -s -w '%{time_total}' https://premium.trademate.ai/health)
+          
+          echo "Post-deployment performance metrics:"
+          echo "Shared tier response time: ${SHARED_RESPONSE}s"
+          echo "Premium tier response time: ${PREMIUM_RESPONSE}s"
+          
+          # Validate SLA compliance
+          if (( $(echo "$SHARED_RESPONSE > 0.1" | bc -l) )); then
+            echo "⚠️ Shared tier SLA breach: ${SHARED_RESPONSE}s > 100ms"
+          else
+            echo "✅ Shared tier SLA met: ${SHARED_RESPONSE}s < 100ms"
+          fi
+          
+          if (( $(echo "$PREMIUM_RESPONSE > 0.05" | bc -l) )); then
+            echo "⚠️ Premium tier SLA breach: ${PREMIUM_RESPONSE}s > 50ms"
+          else
+            echo "✅ Premium tier SLA met: ${PREMIUM_RESPONSE}s < 50ms"
+          fi

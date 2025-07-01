@@ -1,0 +1,182 @@
+import { Meta } from '@storybook/blocks';
+
+<Meta title="Introduction" />
+
+# TradeMate Partner Portal - Component Library
+
+Welcome to the **TradeMate Partner Portal** component library! This Storybook instance contains all the UI components, pages, and patterns used throughout our partner portal application.
+
+## 🏗️ Architecture Overview
+
+Our portal is built with modern technologies:
+
+- **Next.js 14** with App Router
+- **TypeScript** for type safety
+- **Tailwind CSS** for styling
+- **Framer Motion** for animations
+- **Zustand** for state management
+- **NextAuth.js** for authentication
+- **Prisma** for database management
+
+## 📚 Component Categories
+
+### Authentication Components
+- **SignInForm**: Complete authentication form with OAuth support
+- **SignUpForm**: User registration with validation
+- **ErrorBoundary**: Error handling and recovery
+
+### Dashboard Components
+- **SelfHealingDashboard**: System health monitoring
+- **AdminDashboard**: Administrative interface
+- **DeveloperPortal**: API documentation and tools
+
+### UI Components
+- **ToastProvider**: Notification system
+- **LoadingSpinner**: Loading states
+- **Modal**: Dialog components
+
+## 🎨 Design System
+
+### Colors
+Our design system uses a carefully crafted color palette:
+
+- **Primary**: Blue (`blue-600`, `blue-700`)
+- **Success**: Green (`green-600`, `green-700`)
+- **Warning**: Yellow (`yellow-600`, `yellow-700`)
+- **Error**: Red (`red-600`, `red-700`)
+- **Neutral**: Slate (`slate-600`, `slate-700`, `slate-900`)
+
+### Typography
+- **Headings**: Inter font family, various weights
+- **Body**: Inter font family, regular weight
+- **Code**: Fira Code for monospace text
+
+### Spacing
+We use Tailwind's spacing scale (4px base unit):
+- **xs**: 4px
+- **sm**: 8px
+- **md**: 16px
+- **lg**: 24px
+- **xl**: 32px
+
+## 🔧 Development Guidelines
+
+### Component Standards
+1. **TypeScript**: All components must be fully typed
+2. **Props Interface**: Define clear prop interfaces
+3. **Default Props**: Provide sensible defaults
+4. **Accessibility**: Follow WCAG guidelines
+5. **Responsive**: Mobile-first design approach
+
+### Testing
+- **Unit Tests**: Jest + React Testing Library
+- **Visual Tests**: Storybook visual regression
+- **E2E Tests**: Playwright for user journeys
+
+### State Management
+- **Local State**: React hooks (`useState`, `useReducer`)
+- **Global State**: Zustand stores
+- **Server State**: React Query
+- **Form State**: React Hook Form
+
+## 📱 Responsive Design
+
+Our components are designed to work across all device sizes:
+
+- **Mobile**: 375px - 767px
+- **Tablet**: 768px - 1023px
+- **Desktop**: 1024px and above
+
+## 🎯 Usage Examples
+
+### Basic Component Usage
+```tsx
+import { SignInForm } from '@/components/auth/SignInForm';
+
+function LoginPage() {
+  const handleSubmit = (data) => {
+    // Handle form submission
+  };
+
+  return (
+    <SignInForm 
+      onSubmit={handleSubmit}
+      isLoading={false}
+    />
+  );
+}
+```
+
+### State Management Example
+```tsx
+import { useAuthStore } from '@/store/auth';
+
+function UserProfile() {
+  const { user, logout } = useAuthStore();
+  
+  return (
+    <div>
+      <h1>Welcome, {user?.name}</h1>
+      <button onClick={logout}>Logout</button>
+    </div>
+  );
+}
+```
+
+## 🚀 Self-Healing Architecture
+
+Our portal includes advanced self-healing capabilities:
+
+- **Autonomous Monitoring**: Continuous health checks
+- **Auto-Recovery**: Automatic issue resolution
+- **Predictive Analytics**: ML-powered issue prevention
+- **Circuit Breakers**: Fault tolerance patterns
+- **Graceful Degradation**: Fallback mechanisms
+
+## 📊 Performance
+
+- **Lighthouse Score**: 95+ across all metrics
+- **Core Web Vitals**: Optimized for excellent UX
+- **Bundle Size**: Optimized with tree shaking
+- **Loading Times**: <2s initial load
+
+## 🔒 Security
+
+- **Authentication**: Multi-provider OAuth + credentials
+- **Authorization**: Role-based access control
+- **Data Protection**: Encryption at rest and in transit
+- **Session Management**: Secure JWT handling
+- **CSRF Protection**: Built-in security measures
+
+## 🛠️ Development Commands
+
+```bash
+# Start Storybook
+npm run storybook
+
+# Build Storybook
+npm run build-storybook
+
+# Run tests
+npm run test
+
+# Database setup
+npm run db:setup
+
+# Start development server
+npm run dev
+```
+
+## 📖 Additional Resources
+
+- [Next.js Documentation](https://nextjs.org/docs)
+- [Tailwind CSS](https://tailwindcss.com/docs)
+- [Framer Motion](https://www.framer.com/motion/)
+- [Zustand](https://github.com/pmndrs/zustand)
+- [React Query](https://tanstack.com/query/latest)
+
+---
+
+**Happy coding!** 🎉
+
+Explore the components in the sidebar to see detailed examples, props, and usage patterns.

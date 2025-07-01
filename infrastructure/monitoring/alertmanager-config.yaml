@@ -1,0 +1,279 @@
+# AlertManager Configuration for TradeMate Tier-Specific Routing
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'smtp.gmail.com:587'
+      smtp_from: 'alerts@gridworks.ai'
+      smtp_auth_username: 'alerts@gridworks.ai'
+      smtp_auth_password: '${SMTP_PASSWORD}'
+      pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+      slack_api_url: '${SLACK_WEBHOOK_URL}'
+    
+    # Template definitions
+    templates:
+      - '/etc/alertmanager/templates/*.tmpl'
+    
+    # Route configuration with tier-specific routing
+    route:
+      group_by: ['alertname', 'tier', 'severity']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: 'default-receiver'
+      routes:
+      
+      # PREMIUM TIER CRITICAL ALERTS (Immediate Response)
+      - match:
+          tier: premium
+          severity: critical
+        receiver: 'premium-critical'
+        group_wait: 0s  # Immediate
+        group_interval: 1m
+        repeat_interval: 15m
+        routes:
+        - match:
+            escalation: immediate
+          receiver: 'premium-escalation'
+          group_wait: 0s
+          repeat_interval: 5m
+      
+      # PREMIUM TIER WARNING ALERTS
+      - match:
+          tier: premium
+          severity: warning
+        receiver: 'premium-warning'
+        group_wait: 30s
+        group_interval: 2m
+        repeat_interval: 1h
+      
+      # SHARED TIER CRITICAL ALERTS
+      - match:
+          tier: shared
+          severity: critical
+        receiver: 'shared-critical'
+        group_wait: 1m
+        group_interval: 3m
+        repeat_interval: 30m
+      
+      # SHARED TIER WARNING ALERTS
+      - match:
+          tier: shared
+          severity: warning
+        receiver: 'shared-warning'
+        group_wait: 2m
+        group_interval: 5m
+        repeat_interval: 2h
+      
+      # BUSINESS METRICS ALERTS
+      - match:
+          component: trading
+        receiver: 'business-team'
+        group_wait: 1m
+        repeat_interval: 1h
+      
+      # INFRASTRUCTURE ALERTS
+      - match:
+          component: infrastructure
+        receiver: 'infrastructure-team'
+        group_wait: 2m
+        repeat_interval: 6h
+    
+    # Inhibit rules to prevent alert spam
+    inhibit_rules:
+    - source_match:
+        severity: 'critical'
+      target_match:
+        severity: 'warning'
+      equal: ['alertname', 'tier']
+    
+    - source_match:
+        tier: 'premium'
+      target_match:
+        tier: 'shared'
+      equal: ['alertname']
+    
+    # Receiver definitions
+    receivers:
+    
+    # Premium Tier Critical (PagerDuty + Slack + SMS)
+    - name: 'premium-critical'
+      pagerduty_configs:
+      - routing_key: '${PAGERDUTY_PREMIUM_KEY}'
+        description: '🚨 PREMIUM SLA BREACH: {{ .GroupLabels.alertname }}'
+        severity: 'critical'
+        details:
+          tier: '{{ .GroupLabels.tier }}'
+          description: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+          runbook: '{{ range .Alerts }}{{ .Annotations.runbook_url }}{{ end }}'
+          dashboard: '{{ range .Alerts }}{{ .Annotations.dashboard_url }}{{ end }}'
+      
+      slack_configs:
+      - channel: '#premium-alerts'
+        username: 'TradeMate Premium Alert'
+        icon_emoji: ':rotating_light:'
+        title: '🚨 PREMIUM TIER CRITICAL ALERT'
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Tier:* {{ .GroupLabels.tier | toUpper }}
+          *Severity:* {{ .GroupLabels.severity | toUpper }}
+          
+          {{ range .Alerts }}
+          *Description:* {{ .Annotations.description }}
+          *Runbook:* {{ .Annotations.runbook_url }}
+          *Dashboard:* {{ .Annotations.dashboard_url }}
+          {{ end }}
+        actions:
+        - type: button
+          text: 'View Dashboard'
+          url: '{{ range .Alerts }}{{ .Annotations.dashboard_url }}{{ end }}'
+        - type: button
+          text: 'Runbook'
+          url: '{{ range .Alerts }}{{ .Annotations.runbook_url }}{{ end }}'
+      
+      email_configs:
+      - to: 'premium-oncall@gridworks.ai'
+        subject: '🚨 PREMIUM SLA BREACH: {{ .GroupLabels.alertname }}'
+        body: |
+          Premium tier SLA breach detected!
+          
+          Alert: {{ .GroupLabels.alertname }}
+          Tier: {{ .GroupLabels.tier }}
+          Severity: {{ .GroupLabels.severity }}
+          
+          {{ range .Alerts }}
+          Description: {{ .Annotations.description }}
+          Runbook: {{ .Annotations.runbook_url }}
+          Dashboard: {{ .Annotations.dashboard_url }}
+          {{ end }}
+    
+    # Premium Escalation (CEO/CTO notification)
+    - name: 'premium-escalation'
+      slack_configs:
+      - channel: '#executive-alerts'
+        username: 'TradeMate Executive Alert'
+        icon_emoji: ':fire:'
+        title: '🔥 EXECUTIVE ESCALATION - Premium Tier Issue'
+        text: |
+          *IMMEDIATE ATTENTION REQUIRED*
+          
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Tier:* PREMIUM (Elite/Black Users)
+          *Impact:* High-value customer experience affected
+          
+          {{ range .Alerts }}
+          *Issue:* {{ .Annotations.description }}
+          {{ end }}
+      
+      email_configs:
+      - to: 'ceo@gridworks.ai,cto@gridworks.ai'
+        subject: '🔥 EXECUTIVE ALERT: Premium Tier Critical Issue'
+        body: |
+          Immediate attention required for premium tier issue.
+          
+          This affects our highest-value customers (Elite/Black tier)
+          and requires executive oversight.
+          
+          Alert: {{ .GroupLabels.alertname }}
+          Description: {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+    
+    # Premium Warning
+    - name: 'premium-warning'
+      slack_configs:
+      - channel: '#premium-alerts'
+        username: 'TradeMate Premium'
+        icon_emoji: ':warning:'
+        title: '⚠️ Premium Tier Warning'
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Tier:* {{ .GroupLabels.tier | toUpper }}
+          
+          {{ range .Alerts }}
+          {{ .Annotations.description }}
+          {{ end }}
+    
+    # Shared Tier Critical
+    - name: 'shared-critical'
+      slack_configs:
+      - channel: '#shared-alerts'
+        username: 'TradeMate Shared'
+        icon_emoji: ':exclamation:'
+        title: '‼️ Shared Tier Critical Alert'
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Tier:* {{ .GroupLabels.tier | toUpper }} (LITE + PRO)
+          
+          {{ range .Alerts }}
+          {{ .Annotations.description }}
+          {{ end }}
+      
+      email_configs:
+      - to: 'shared-oncall@gridworks.ai'
+        subject: 'Shared Tier Critical: {{ .GroupLabels.alertname }}'
+        body: |
+          Critical issue detected in shared tier (LITE + PRO users).
+          
+          {{ range .Alerts }}
+          Description: {{ .Annotations.description }}
+          {{ end }}
+    
+    # Shared Tier Warning
+    - name: 'shared-warning'
+      slack_configs:
+      - channel: '#shared-alerts'
+        username: 'TradeMate Shared'
+        icon_emoji: ':warning:'
+        title: '⚠️ Shared Tier Warning'
+        text: |
+          {{ .GroupLabels.alertname }}: {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+    
+    # Business Team
+    - name: 'business-team'
+      slack_configs:
+      - channel: '#business-metrics'
+        username: 'TradeMate Business'
+        icon_emoji: ':chart_with_upwards_trend:'
+        title: 'Business Metrics Alert'
+        text: |
+          {{ .GroupLabels.alertname }}: {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+    
+    # Infrastructure Team
+    - name: 'infrastructure-team'
+      slack_configs:
+      - channel: '#infrastructure'
+        username: 'TradeMate Infrastructure'
+        icon_emoji: ':gear:'
+        title: 'Infrastructure Alert'
+        text: |
+          {{ .GroupLabels.alertname }}: {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+    
+    # Default Receiver
+    - name: 'default-receiver'
+      slack_configs:
+      - channel: '#general-alerts'
+        username: 'TradeMate'
+        text: 'Alert: {{ .GroupLabels.alertname }}'
+
+  # Alert templates
+  premium-alert.tmpl: |
+    {{ define "premium.title" }}
+    🚨 PREMIUM TIER ALERT: {{ .GroupLabels.alertname }}
+    {{ end }}
+    
+    {{ define "premium.description" }}
+    {{ range .Alerts }}
+    Tier: {{ .Labels.tier | toUpper }}
+    Severity: {{ .Labels.severity | toUpper }}
+    Description: {{ .Annotations.description }}
+    Runbook: {{ .Annotations.runbook_url }}
+    Dashboard: {{ .Annotations.dashboard_url }}
+    {{ end }}
+    {{ end }}
+    
+    {{ define "shared.title" }}
+    ⚠️ SHARED TIER ALERT: {{ .GroupLabels.alertname }}
+    {{ end }}

@@ -1,0 +1,40 @@
+# Premium tier performance packages
+uvloop>=0.17.0  # High-performance event loop
+cython>=0.29.0  # C extensions for speed
+numpy>=1.24.0  # Optimized numerical computing
+scipy>=1.10.0  # Scientific computing
+numba>=0.56.0  # JIT compiler for Python
+
+# Institutional trading features
+quantlib>=1.30  # Quantitative finance library
+pandas>=1.5.0  # Data manipulation with performance
+ta-lib>=0.4.0  # Technical analysis indicators
+
+# High-performance networking
+httpx[http2]>=0.24.0  # HTTP/2 support
+websockets>=11.0  # WebSocket performance
+aioredis>=2.0.0  # Async Redis client
+
+# Premium monitoring and observability
+prometheus-client>=0.16.0  # Metrics collection
+opentelemetry-api>=1.15.0  # Distributed tracing
+
+# Security enhancements
+cryptography>=40.0.0  # Advanced cryptography
+joselib>=3.3.0  # JWT with performance optimizations
+
+# Machine learning for premium features
+scikit-learn>=1.2.0  # ML algorithms
+tensorflow>=2.12.0  # Deep learning (CPU optimized)
+
+# Database performance
+sqlalchemy[asyncio]>=2.0.0  # Async ORM
+aiopg>=1.4.0  # Async PostgreSQL
+
+# Premium API features
+fastapi[all]>=0.95.0  # Full FastAPI with optimizations
+starlette>=0.27.0  # ASGI framework
+
+# Caching optimizations
+hiredis>=2.2.0  # Fast Redis protocol parser
+pymemcache>=4.0.0  # Memcached client

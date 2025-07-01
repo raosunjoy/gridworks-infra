@@ -1,0 +1,123 @@
+{
+  "name": "gridworks-premium-portal",
+  "version": "1.0.0",
+  "description": "GridWorks Premium Portal - The Ultimate Financial Infrastructure Experience",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:ci": "jest --ci --coverage --watchAll=false",
+    "test:unit": "jest --selectProjects=\"Unit Tests\"",
+    "test:integration": "jest --selectProjects=\"Integration Tests\"", 
+    "test:e2e": "jest --selectProjects=\"E2E Tests\"",
+    "test:security": "jest --selectProjects=\"Security Tests\"",
+    "test:performance": "jest --selectProjects=\"Performance Tests\"",
+    "test:debug": "node --inspect-brk node_modules/.bin/jest --runInBand",
+    "test:update-snapshots": "jest --updateSnapshot",
+    "coverage:open": "open coverage/lcov-report/index.html",
+    "coverage:check": "jest --coverage --coverageThreshold='{\"global\":{\"branches\":100,\"functions\":100,\"lines\":100,\"statements\":100}}'",
+    "quality:check": "npm run lint && npm run type-check && npm run test:coverage",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit",
+    "format": "prettier --write .",
+    "analyze": "ANALYZE=true npm run build",
+    "prebuild": "npm run quality:check",
+    "clean": "rm -rf .next build dist coverage .jest-cache"
+  },
+  "dependencies": {
+    "next": "^14.0.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.3.3",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "@types/node": "^20.10.5",
+    "tailwindcss": "^3.4.0",
+    "framer-motion": "^10.16.16",
+    "three": "^0.158.0",
+    "@react-three/fiber": "^8.15.12",
+    "@react-three/drei": "^9.88.13",
+    "zustand": "^4.4.7",
+    "@tanstack/react-query": "^5.14.2",
+    "immer": "^10.0.3",
+    "axios": "^1.6.2",
+    "crypto-js": "^4.2.0",
+    "ua-parser-js": "^1.0.37",
+    "fingerprintjs2": "^2.1.4",
+    "zod": "^3.22.4",
+    "react-hook-form": "^7.48.2",
+    "@hookform/resolvers": "^3.3.2",
+    "clsx": "^2.0.0",
+    "class-variance-authority": "^0.7.0",
+    "lucide-react": "^0.294.0",
+    "@radix-ui/react-dialog": "^1.0.5",
+    "@radix-ui/react-dropdown-menu": "^2.0.6",
+    "@radix-ui/react-toast": "^1.1.5"
+  },
+  "devDependencies": {
+    "@next/bundle-analyzer": "^14.0.4",
+    "@testing-library/react": "^14.1.2",
+    "@testing-library/jest-dom": "^6.1.5",
+    "@testing-library/user-event": "^14.5.1",
+    "@playwright/test": "^1.40.1",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "@types/jest": "^29.5.8",
+    "@types/crypto-js": "^4.2.1",
+    "@types/ua-parser-js": "^0.7.39",
+    "@types/three": "^0.158.3",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "^14.0.4",
+    "@typescript-eslint/eslint-plugin": "^6.14.0",
+    "@typescript-eslint/parser": "^6.14.0",
+    "prettier": "^3.1.1",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "coveralls": "^3.1.1"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": ["<rootDir>/src/test/setup.ts"],
+    "moduleNameMapping": {
+      "^@/(.*)$": "<rootDir>/src/$1"
+    },
+    "collectCoverageFrom": [
+      "src/**/*.{ts,tsx}",
+      "!src/**/*.d.ts",
+      "!src/test/**/*",
+      "!src/**/*.stories.*"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 100,
+        "functions": 100,
+        "lines": 100,
+        "statements": 100
+      }
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "keywords": [
+    "luxury-trading",
+    "black-portal",
+    "ultra-premium",
+    "billionaire-trading",
+    "vertu-experience",
+    "ai-butler",
+    "zero-knowledge",
+    "hardware-locked"
+  ],
+  "author": "GridWorks Platform Team",
+  "license": "PROPRIETARY",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gridworks-platform/gridworks-platform.git"
+  }
+}

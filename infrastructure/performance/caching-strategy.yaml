@@ -1,0 +1,350 @@
+# TradeMate Tier-Specific Caching Strategy
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: caching-strategy
+  namespace: gridworks
+data:
+  # Redis configuration for shared tier
+  redis-shared.conf: |
+    # Basic Redis configuration for LITE + PRO users
+    bind 0.0.0.0
+    protected-mode yes
+    port 6379
+    
+    # Memory management (40GB for shared tier)
+    maxmemory 40gb
+    maxmemory-policy allkeys-lru
+    
+    # Persistence (less frequent for shared)
+    save 900 1
+    save 300 10
+    save 60 10000
+    
+    # Performance tuning
+    tcp-backlog 511
+    timeout 300
+    tcp-keepalive 60
+    
+    # Shared tier specific
+    databases 16
+    hz 10
+    
+    # Eviction and expiry
+    lazyfree-lazy-eviction yes
+    lazyfree-lazy-expire yes
+    
+  # Redis configuration for premium tier
+  redis-premium.conf: |
+    # High-performance Redis for Elite + Black users
+    bind 0.0.0.0
+    protected-mode yes
+    port 6379
+    
+    # Memory management (80GB for premium tier)
+    maxmemory 80gb
+    maxmemory-policy volatile-lru
+    
+    # Persistence (more frequent for premium)
+    save 300 1
+    save 60 100
+    save 30 10000
+    
+    # Performance tuning (aggressive)
+    tcp-backlog 2048
+    timeout 0
+    tcp-keepalive 30
+    
+    # Premium tier specific
+    databases 32
+    hz 50
+    
+    # Advanced features
+    lazyfree-lazy-eviction yes
+    lazyfree-lazy-expire yes
+    lazyfree-lazy-server-del yes
+    replica-lazy-flush yes
+    
+    # IO threads for better performance
+    io-threads 8
+    io-threads-do-reads yes
+    
+  # Cache warming configuration
+  cache-warming.yaml: |
+    shared_tier:
+      warmup_queries:
+        - name: portfolio_summary
+          ttl: 300  # 5 minutes
+          priority: high
+          query: "SELECT user_id, portfolio_value FROM mv_portfolio_summary_shared"
+          
+        - name: recent_trades
+          ttl: 180  # 3 minutes
+          priority: medium
+          query: "SELECT * FROM trades WHERE created_at > NOW() - INTERVAL '24 hours' LIMIT 1000"
+          
+        - name: market_overview
+          ttl: 60   # 1 minute
+          priority: high
+          query: "SELECT symbol, current_price, day_change FROM stock_prices WHERE symbol IN ('NIFTY50', 'SENSEX')"
+          
+        - name: user_watchlist
+          ttl: 300  # 5 minutes
+          priority: medium
+          query: "SELECT DISTINCT symbol FROM watchlist WHERE active = true"
+    
+    premium_tier:
+      warmup_queries:
+        - name: realtime_positions
+          ttl: 30   # 30 seconds
+          priority: critical
+          query: "SELECT * FROM mv_realtime_positions_premium"
+          
+        - name: options_chain
+          ttl: 15   # 15 seconds
+          priority: critical
+          query: "SELECT * FROM options_chain WHERE expiry_date >= CURRENT_DATE ORDER BY volume DESC LIMIT 500"
+          
+        - name: market_depth
+          ttl: 5    # 5 seconds
+          priority: critical
+          query: "SELECT * FROM market_depth WHERE symbol IN (SELECT symbol FROM top_traded_stocks LIMIT 50)"
+          
+        - name: institutional_flow
+          ttl: 60   # 1 minute
+          priority: high
+          query: "SELECT * FROM institutional_trades WHERE trade_date = CURRENT_DATE"
+          
+        - name: algo_performance
+          ttl: 120  # 2 minutes
+          priority: medium
+          query: "SELECT strategy_id, performance_metrics FROM algo_strategies WHERE user_tier IN ('ELITE', 'BLACK')"
+    
+  # Caching rules
+  caching-rules.yaml: |
+    rules:
+      # Shared tier caching rules
+      - tier: shared
+        endpoint: /api/v1/portfolio
+        cache_duration: 300  # 5 minutes
+        cache_key_pattern: "portfolio:{user_id}"
+        invalidate_on: ["trade_executed", "portfolio_updated"]
+        
+      - tier: shared
+        endpoint: /api/v1/trades/history
+        cache_duration: 600  # 10 minutes
+        cache_key_pattern: "trades:history:{user_id}:{page}"
+        invalidate_on: ["trade_executed"]
+        
+      - tier: shared
+        endpoint: /api/v1/market/quotes
+        cache_duration: 60   # 1 minute
+        cache_key_pattern: "quotes:{symbols}"
+        shared_cache: true
+        
+      # Premium tier caching rules (shorter TTLs)
+      - tier: premium
+        endpoint: /api/v1/portfolio
+        cache_duration: 30   # 30 seconds
+        cache_key_pattern: "premium:portfolio:{user_id}"
+        invalidate_on: ["trade_executed", "portfolio_updated"]
+        
+      - tier: premium
+        endpoint: /api/v1/realtime/positions
+        cache_duration: 5    # 5 seconds
+        cache_key_pattern: "premium:positions:{user_id}"
+        invalidate_on: ["trade_executed", "price_update"]
+        
+      - tier: premium
+        endpoint: /api/v1/algo/performance
+        cache_duration: 60   # 1 minute
+        cache_key_pattern: "premium:algo:{user_id}:{strategy_id}"
+        invalidate_on: ["algo_trade_executed"]
+        
+      - tier: premium
+        endpoint: /api/v1/market/depth
+        cache_duration: 2    # 2 seconds
+        cache_key_pattern: "premium:depth:{symbol}"
+        shared_cache: false  # Dedicated cache for premium
+---
+# Redis Cluster deployment for shared tier
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-shared
+  namespace: shared
+spec:
+  serviceName: redis-shared
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis-shared
+  template:
+    metadata:
+      labels:
+        app: redis-shared
+        tier: shared
+    spec:
+      containers:
+      - name: redis
+        image: redis:7.0-alpine
+        command:
+        - redis-server
+        - /usr/local/etc/redis/redis.conf
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            memory: "45Gi"
+            cpu: "4"
+          limits:
+            memory: "50Gi"
+            cpu: "8"
+        volumeMounts:
+        - name: redis-config
+          mountPath: /usr/local/etc/redis
+        - name: redis-data
+          mountPath: /data
+      volumes:
+      - name: redis-config
+        configMap:
+          name: caching-strategy
+          items:
+          - key: redis-shared.conf
+            path: redis.conf
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 100Gi
+      storageClassName: gp3
+---
+# Redis Cluster deployment for premium tier
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-premium
+  namespace: premium
+spec:
+  serviceName: redis-premium
+  replicas: 5  # More replicas for premium
+  selector:
+    matchLabels:
+      app: redis-premium
+  template:
+    metadata:
+      labels:
+        app: redis-premium
+        tier: premium
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - redis-premium
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: redis
+        image: redis:7.0-alpine
+        command:
+        - redis-server
+        - /usr/local/etc/redis/redis.conf
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            memory: "85Gi"
+            cpu: "8"
+          limits:
+            memory: "90Gi"
+            cpu: "16"
+        volumeMounts:
+        - name: redis-config
+          mountPath: /usr/local/etc/redis
+        - name: redis-data
+          mountPath: /data
+      volumes:
+      - name: redis-config
+        configMap:
+          name: caching-strategy
+          items:
+          - key: redis-premium.conf
+            path: redis.conf
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 200Gi
+      storageClassName: io2  # High-performance SSD for premium
+---
+# Cache warmer CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cache-warmer
+  namespace: gridworks
+spec:
+  schedule: "*/5 * * * *"  # Every 5 minutes
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: cache-warmer
+            image: gridworks/cache-warmer:latest
+            env:
+            - name: TIER
+              value: "both"  # Warm both tiers
+            - name: REDIS_SHARED_URL
+              value: "redis://redis-shared.shared.svc.cluster.local:6379"
+            - name: REDIS_PREMIUM_URL
+              value: "redis://redis-premium.premium.svc.cluster.local:6379"
+            command:
+            - python3
+            - /app/warm_cache.py
+            resources:
+              requests:
+                memory: "1Gi"
+                cpu: "500m"
+              limits:
+                memory: "2Gi"
+                cpu: "1000m"
+          restartPolicy: OnFailure
+---
+# Service for Redis shared tier
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-shared
+  namespace: shared
+spec:
+  clusterIP: None
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: redis-shared
+---
+# Service for Redis premium tier
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-premium
+  namespace: premium
+spec:
+  clusterIP: None
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: redis-premium

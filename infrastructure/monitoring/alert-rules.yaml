@@ -1,0 +1,285 @@
+# TradeMate Tier-Specific Alert Rules
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alert-rules
+  namespace: monitoring
+data:
+  shared-tier-alerts.yml: |
+    groups:
+    - name: shared-tier-sla
+      interval: 30s
+      rules:
+      # Shared Tier Performance SLA (100ms)
+      - alert: SharedTierHighLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{tier="shared"}[5m])) by (le)) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          tier: shared
+          sla: performance
+        annotations:
+          summary: "Shared tier API latency exceeds 100ms SLA"
+          description: "95th percentile latency is {{ $value }}s (SLA: <100ms)"
+          runbook_url: "https://docs.gridworks.ai/runbooks/shared-latency"
+          dashboard_url: "https://grafana.gridworks.ai/d/shared-performance"
+      
+      # Shared Tier Error Rate
+      - alert: SharedTierHighErrorRate
+        expr: sum(rate(http_requests_total{status=~"5..",tier="shared"}[5m])) / sum(rate(http_requests_total{tier="shared"}[5m])) > 0.05
+        for: 1m
+        labels:
+          severity: critical
+          tier: shared
+          sla: availability
+        annotations:
+          summary: "High error rate in shared tier API"
+          description: "Error rate is {{ $value | humanizePercentage }} (SLA: <5%)"
+          runbook_url: "https://docs.gridworks.ai/runbooks/shared-errors"
+      
+      # Shared Tier Availability
+      - alert: SharedTierAvailability
+        expr: avg_over_time(up{tier="shared"}[5m]) < 0.99
+        for: 30s
+        labels:
+          severity: critical
+          tier: shared
+          sla: availability
+        annotations:
+          summary: "Shared tier availability below 99%"
+          description: "Availability is {{ $value | humanizePercentage }}"
+      
+      # Resource Utilization
+      - alert: SharedTierHighCPU
+        expr: avg(rate(container_cpu_usage_seconds_total{tier="shared"}[5m])) by (pod) > 0.8
+        for: 3m
+        labels:
+          severity: warning
+          tier: shared
+          resource: cpu
+        annotations:
+          summary: "High CPU usage in shared tier"
+          description: "Pod {{ $labels.pod }} CPU usage is {{ $value | humanizePercentage }}"
+      
+      - alert: SharedTierHighMemory
+        expr: avg(container_memory_usage_bytes{tier="shared"}) by (pod) / avg(container_spec_memory_limit_bytes{tier="shared"}) by (pod) > 0.85
+        for: 2m
+        labels:
+          severity: warning
+          tier: shared
+          resource: memory
+        annotations:
+          summary: "High memory usage in shared tier"
+          description: "Pod {{ $labels.pod }} memory usage is {{ $value | humanizePercentage }}"
+
+  premium-tier-alerts.yml: |
+    groups:
+    - name: premium-tier-sla
+      interval: 15s  # More frequent evaluation for premium
+      rules:
+      # Premium Tier Performance SLA (50ms)
+      - alert: PremiumTierHighLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{tier="premium"}[2m])) by (le)) > 0.05
+        for: 1m  # Faster alerting for premium
+        labels:
+          severity: critical
+          tier: premium
+          sla: performance
+          escalation: immediate
+        annotations:
+          summary: "🚨 PREMIUM SLA BREACH - High latency detected"
+          description: "95th percentile latency is {{ $value }}s (SLA: <50ms)"
+          runbook_url: "https://docs.gridworks.ai/runbooks/premium-latency"
+          dashboard_url: "https://grafana.gridworks.ai/d/premium-performance"
+          pagerduty_service: "premium-api"
+      
+      # Premium P99 Latency (stricter)
+      - alert: PremiumTierP99Latency
+        expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{tier="premium"}[2m])) by (le)) > 0.1
+        for: 30s
+        labels:
+          severity: critical
+          tier: premium
+          sla: performance
+        annotations:
+          summary: "Premium tier P99 latency exceeds 100ms"
+          description: "99th percentile latency is {{ $value }}s"
+      
+      # Premium Tier Error Rate (stricter)
+      - alert: PremiumTierErrorRate
+        expr: sum(rate(http_requests_total{status=~"5..",tier="premium"}[2m])) / sum(rate(http_requests_total{tier="premium"}[2m])) > 0.01
+        for: 30s  # Very fast alerting
+        labels:
+          severity: critical
+          tier: premium
+          sla: availability
+          escalation: immediate
+        annotations:
+          summary: "🚨 PREMIUM ERROR RATE SLA BREACH"
+          description: "Error rate is {{ $value | humanizePercentage }} (SLA: <1%)"
+          runbook_url: "https://docs.gridworks.ai/runbooks/premium-errors"
+      
+      # Premium Availability (99.99%)
+      - alert: PremiumTierAvailability
+        expr: avg_over_time(up{tier="premium"}[2m]) < 0.9999
+        for: 15s
+        labels:
+          severity: critical
+          tier: premium
+          sla: availability
+          escalation: immediate
+        annotations:
+          summary: "🚨 PREMIUM AVAILABILITY SLA BREACH"
+          description: "Availability is {{ $value | humanizePercentage }} (SLA: 99.99%)"
+      
+      # Colocation Performance
+      - alert: ColocationLatency
+        expr: avg(ping_rtt_ms{target=~"nse.*|bse.*"}) > 5
+        for: 1m
+        labels:
+          severity: warning
+          tier: premium
+          component: colocation
+        annotations:
+          summary: "High latency to exchange colocation"
+          description: "Ping RTT to {{ $labels.target }} is {{ $value }}ms"
+      
+      # Premium Resource Utilization (stricter thresholds)
+      - alert: PremiumTierHighCPU
+        expr: avg(rate(container_cpu_usage_seconds_total{tier="premium"}[2m])) by (pod) > 0.7
+        for: 1m
+        labels:
+          severity: warning
+          tier: premium
+          resource: cpu
+        annotations:
+          summary: "High CPU usage in premium tier"
+          description: "Pod {{ $labels.pod }} CPU usage is {{ $value | humanizePercentage }}"
+      
+      - alert: PremiumTierHighMemory
+        expr: avg(container_memory_usage_bytes{tier="premium"}) by (pod) / avg(container_spec_memory_limit_bytes{tier="premium"}) by (pod) > 0.8
+        for: 1m
+        labels:
+          severity: warning
+          tier: premium
+          resource: memory
+        annotations:
+          summary: "High memory usage in premium tier"
+          description: "Pod {{ $labels.pod }} memory usage is {{ $value | humanizePercentage }}"
+
+  business-alerts.yml: |
+    groups:
+    - name: business-metrics
+      interval: 60s
+      rules:
+      # Trading Volume Anomalies
+      - alert: LowTradingVolume
+        expr: sum(rate(trades_total[5m])) < 10
+        for: 5m
+        labels:
+          severity: warning
+          component: trading
+        annotations:
+          summary: "Low trading volume detected"
+          description: "Trading volume is {{ $value }} trades/sec"
+      
+      # WhatsApp Message Processing
+      - alert: WhatsAppMessageBacklog
+        expr: sum(whatsapp_message_queue_size) > 1000
+        for: 2m
+        labels:
+          severity: warning
+          component: whatsapp
+        annotations:
+          summary: "WhatsApp message backlog building up"
+          description: "{{ $value }} messages in queue"
+      
+      # User Authentication Issues
+      - alert: HighAuthFailureRate
+        expr: sum(rate(auth_failures_total[5m])) / sum(rate(auth_attempts_total[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: "High authentication failure rate"
+          description: "Auth failure rate is {{ $value | humanizePercentage }}"
+      
+      # Database Performance
+      - alert: DatabaseSlowQueries
+        expr: mysql_global_status_slow_queries > 100
+        for: 3m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "High number of slow database queries"
+          description: "{{ $value }} slow queries detected"
+      
+      # Cache Hit Rate
+      - alert: LowCacheHitRate
+        expr: sum(rate(redis_commands_processed_total{cmd="get"}[5m])) / sum(rate(redis_commands_processed_total{cmd=~"get|set"}[5m])) < 0.8
+        for: 3m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache hit rate is {{ $value | humanizePercentage }}"
+
+  infrastructure-alerts.yml: |
+    groups:
+    - name: infrastructure
+      interval: 30s
+      rules:
+      # Node Resource Exhaustion
+      - alert: NodeHighCPU
+        expr: 100 - (avg(irate(node_cpu_seconds_total{mode="idle"}[5m])) by (instance) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High CPU usage on node"
+          description: "Node {{ $labels.instance }} CPU usage is {{ $value }}%"
+      
+      - alert: NodeHighMemory
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 3m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High memory usage on node"
+          description: "Node {{ $labels.instance }} memory usage is {{ $value }}%"
+      
+      - alert: NodeDiskSpace
+        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 85
+        for: 2m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "Low disk space on node"
+          description: "Node {{ $labels.instance }} disk usage is {{ $value }}%"
+      
+      # Kubernetes Cluster Health
+      - alert: KubernetesPodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "Pod is crash looping"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently"
+      
+      - alert: KubernetesNodeNotReady
+        expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: kubernetes
+        annotations:
+          summary: "Kubernetes node not ready"
+          description: "Node {{ $labels.node }} is not ready"

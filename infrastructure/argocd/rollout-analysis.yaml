@@ -1,0 +1,141 @@
+# ArgoCD Rollout Analysis Templates for Performance and Success Rate Validation
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate
+  namespace: shared
+spec:
+  metrics:
+  - name: success-rate
+    interval: 30s
+    count: 5
+    successCondition: result[0] >= 0.95
+    failureLimit: 3
+    provider:
+      prometheus:
+        address: http://prometheus.monitoring.svc.cluster.local:9090
+        query: |
+          sum(rate(http_requests_total{status!~"5..",service="{{args.service-name}}"}[2m]))
+          /
+          sum(rate(http_requests_total{service="{{args.service-name}}"}[2m]))
+  args:
+  - name: service-name
+    value: shared-api-preview
+
+---
+# Premium tier success rate template (stricter requirements)
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: premium-success-rate
+  namespace: premium
+spec:
+  metrics:
+  - name: premium-success-rate
+    interval: 15s  # More frequent checks for premium
+    count: 8
+    successCondition: result[0] >= 0.99  # Stricter success rate
+    failureLimit: 2  # Lower failure tolerance
+    provider:
+      prometheus:
+        address: http://prometheus.monitoring.svc.cluster.local:9090
+        query: |
+          sum(rate(http_requests_total{status!~"5..",service="{{args.service-name}}",tier="premium"}[1m]))
+          /
+          sum(rate(http_requests_total{service="{{args.service-name}}",tier="premium"}[1m]))
+  args:
+  - name: service-name
+    value: premium-api-preview
+
+---
+# Premium latency analysis template
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: premium-latency-check
+  namespace: premium
+spec:
+  metrics:
+  - name: premium-p95-latency
+    interval: 15s
+    count: 6
+    successCondition: result[0] <= 0.05  # 50ms SLA
+    failureLimit: 2
+    provider:
+      prometheus:
+        address: http://prometheus.monitoring.svc.cluster.local:9090
+        query: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{service="{{args.service-name}}",tier="premium"}[1m]))
+            by (le)
+          )
+  - name: premium-p99-latency
+    interval: 15s
+    count: 6
+    successCondition: result[0] <= 0.1  # 100ms p99 limit
+    failureLimit: 1
+    provider:
+      prometheus:
+        address: http://prometheus.monitoring.svc.cluster.local:9090
+        query: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{service="{{args.service-name}}",tier="premium"}[1m]))
+            by (le)
+          )
+  - name: premium-error-budget
+    interval: 30s
+    count: 4
+    successCondition: result[0] >= 0.999  # 99.9% availability budget
+    failureLimit: 1
+    provider:
+      prometheus:
+        address: http://prometheus.monitoring.svc.cluster.local:9090
+        query: |
+          1 - (
+            sum(rate(http_requests_total{status=~"5..",service="{{args.service-name}}",tier="premium"}[5m]))
+            /
+            sum(rate(http_requests_total{service="{{args.service-name}}",tier="premium"}[5m]))
+          )
+  args:
+  - name: service-name
+    value: premium-api-preview
+
+---
+# Shared tier latency analysis (more relaxed)
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: shared-latency-check
+  namespace: shared
+spec:
+  metrics:
+  - name: shared-p95-latency
+    interval: 30s
+    count: 4
+    successCondition: result[0] <= 0.1  # 100ms SLA
+    failureLimit: 3
+    provider:
+      prometheus:
+        address: http://prometheus.monitoring.svc.cluster.local:9090
+        query: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{service="{{args.service-name}}",tier="shared"}[2m]))
+            by (le)
+          )
+  - name: shared-error-budget
+    interval: 45s
+    count: 3
+    successCondition: result[0] >= 0.99  # 99% availability budget
+    failureLimit: 2
+    provider:
+      prometheus:
+        address: http://prometheus.monitoring.svc.cluster.local:9090
+        query: |
+          1 - (
+            sum(rate(http_requests_total{status=~"5..",service="{{args.service-name}}",tier="shared"}[5m]))
+            /
+            sum(rate(http_requests_total{service="{{args.service-name}}",tier="shared"}[5m]))
+          )
+  args:
+  - name: service-name
+    value: shared-api-preview

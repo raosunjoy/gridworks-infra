@@ -1,0 +1,223 @@
+# Prometheus Configuration for TradeMate Tier-Specific Monitoring
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+  labels:
+    app: prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: 'gridworks-production'
+        environment: 'production'
+    
+    rule_files:
+      - "/etc/prometheus/rules/*.yml"
+    
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+              - alertmanager:9093
+    
+    scrape_configs:
+    # =======================
+    # SHARED TIER MONITORING
+    # =======================
+    - job_name: 'shared-tier-api'
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names: ['shared']
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: keep
+          regex: shared-api
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: instance
+        - source_labels: [__meta_kubernetes_pod_label_version]
+          target_label: version
+        - target_label: tier
+          replacement: shared
+      scrape_interval: 15s
+      metrics_path: /metrics
+      
+    - job_name: 'shared-tier-database'
+      static_configs:
+        - targets: ['shared-db-exporter:9187']
+      scrape_interval: 30s
+      relabel_configs:
+        - target_label: tier
+          replacement: shared
+        - target_label: component
+          replacement: database
+    
+    - job_name: 'shared-tier-redis'
+      static_configs:
+        - targets: ['shared-redis-exporter:9121']
+      scrape_interval: 30s
+      relabel_configs:
+        - target_label: tier
+          replacement: shared
+        - target_label: component
+          replacement: cache
+    
+    # ========================
+    # PREMIUM TIER MONITORING
+    # ========================
+    - job_name: 'premium-tier-api'
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names: ['premium']
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          action: keep
+          regex: premium-api
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: instance
+        - source_labels: [__meta_kubernetes_pod_label_version]
+          target_label: version
+        - target_label: tier
+          replacement: premium
+      scrape_interval: 10s  # More frequent for premium
+      metrics_path: /metrics
+      
+    - job_name: 'premium-tier-database'
+      static_configs:
+        - targets: ['premium-db-exporter:9187']
+      scrape_interval: 15s  # More frequent for premium
+      relabel_configs:
+        - target_label: tier
+          replacement: premium
+        - target_label: component
+          replacement: database
+    
+    - job_name: 'premium-tier-redis'
+      static_configs:
+        - targets: ['premium-redis-exporter:9121']
+      scrape_interval: 15s
+      relabel_configs:
+        - target_label: tier
+          replacement: premium
+        - target_label: component
+          replacement: cache
+    
+    - job_name: 'premium-colocation'
+      static_configs:
+        - targets: ['colocation-node-exporter:9100']
+      scrape_interval: 10s
+      relabel_configs:
+        - target_label: tier
+          replacement: premium
+        - target_label: component
+          replacement: colocation
+    
+    # ===================
+    # INFRASTRUCTURE
+    # ===================
+    - job_name: 'kubernetes-apiservers'
+      kubernetes_sd_configs:
+        - role: endpoints
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+          action: keep
+          regex: default;kubernetes;https
+    
+    - job_name: 'kubernetes-nodes'
+      kubernetes_sd_configs:
+        - role: node
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+        - action: labelmap
+          regex: __meta_kubernetes_node_label_(.+)
+    
+    - job_name: 'kubernetes-pods'
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: kubernetes_namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: kubernetes_pod_name
+    
+    # ===================
+    # BUSINESS METRICS
+    # ===================
+    - job_name: 'whatsapp-webhook'
+      static_configs:
+        - targets: ['whatsapp-webhook:8080']
+      scrape_interval: 10s
+      relabel_configs:
+        - target_label: component
+          replacement: whatsapp
+    
+    - job_name: 'trading-engine'
+      kubernetes_sd_configs:
+        - role: service
+          namespaces:
+            names: ['shared', 'premium']
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_service_label_component]
+          action: keep
+          regex: trading-engine
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: tier
+          regex: (shared|premium)
+    
+    # ===================
+    # EXTERNAL SERVICES
+    # ===================
+    - job_name: 'blackbox-http'
+      metrics_path: /probe
+      params:
+        module: [http_2xx]
+      static_configs:
+        - targets:
+          - https://api.gridworks.ai/health
+          - https://premium.gridworks.ai/health
+      relabel_configs:
+        - source_labels: [__address__]
+          target_label: __param_target
+        - source_labels: [__param_target]
+          target_label: instance
+        - target_label: __address__
+          replacement: blackbox-exporter:9115
+    
+    # ===================
+    # SLA MONITORING
+    # ===================
+    - job_name: 'sla-monitoring'
+      static_configs:
+        - targets: ['sla-exporter:9090']
+      scrape_interval: 60s
+      relabel_configs:
+        - target_label: component
+          replacement: sla

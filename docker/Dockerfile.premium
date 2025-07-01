@@ -1,0 +1,63 @@
+# TradeMate Premium Tier Dockerfile
+# High-performance build for Elite + Black users
+
+FROM python:3.11-slim as base
+
+# Set performance target for premium tier
+ARG TIER=premium
+ARG PERFORMANCE_TARGET=50ms
+ARG INSTITUTIONAL_FEATURES=true
+
+# Install system dependencies with performance optimizations
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    curl \
+    libnuma1 \
+    numactl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements and install Python dependencies with performance packages
+COPY requirements.txt .
+COPY requirements-premium.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir -r requirements-premium.txt
+
+# Copy application code
+COPY app/ ./app/
+COPY config/ ./config/
+
+# Copy premium-specific configurations
+COPY app/institutional/ ./app/institutional/
+COPY config/premium/ ./config/premium/
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash premiumuser \
+    && chown -R premiumuser:premiumuser /app
+USER premiumuser
+
+# Set environment variables for premium tier
+ENV TIER_MODE=PREMIUM
+ENV PERFORMANCE_TARGET=${PERFORMANCE_TARGET}
+ENV INSTITUTIONAL_FEATURES=${INSTITUTIONAL_FEATURES}
+ENV COLOCATION_ENABLED=true
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Performance optimizations
+ENV MALLOC_ARENA_MAX=2
+ENV PYTHONHASHSEED=random
+
+# Health check with stricter requirements
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Start command for premium tier with performance optimizations
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8", "--worker-class", "uvicorn.workers.UvicornWorker", "--loop", "uvloop"]

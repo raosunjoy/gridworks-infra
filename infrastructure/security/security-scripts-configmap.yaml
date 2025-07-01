@@ -1,0 +1,359 @@
+# Security Scripts ConfigMap for TradeMate
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: security-scripts
+  namespace: security
+data:
+  # Security metrics upload script
+  upload-security-metrics.py: |
+    #!/usr/bin/env python3
+    import json
+    import requests
+    import os
+    from datetime import datetime
+    
+    def upload_metrics():
+        try:
+            # Read all security scan results
+            results = {}
+            
+            scan_files = [
+                '/tmp/shared-scan.json',
+                '/tmp/premium-scan.json',
+                '/tmp/bandit-results.json',
+                '/tmp/safety-results.json',
+                '/tmp/zap-shared-results.json',
+                '/tmp/zap-premium-results.json',
+                '/tmp/checkov-results.json',
+                '/tmp/sebi-compliance.json'
+            ]
+            
+            for file_path in scan_files:
+                try:
+                    if os.path.exists(file_path):
+                        with open(file_path, 'r') as f:
+                            filename = os.path.basename(file_path)
+                            results[filename] = json.load(f)
+                except Exception as e:
+                    print(f"Failed to read {file_path}: {e}")
+            
+            # Upload to monitoring system
+            monitoring_url = os.getenv('MONITORING_WEBHOOK_URL', 'http://prometheus-pushgateway:9091')
+            
+            # Convert to Prometheus metrics format
+            metrics = []
+            
+            # Container vulnerability metrics
+            for tier in ['shared', 'premium']:
+                scan_file = f'{tier}-scan.json'
+                if scan_file in results:
+                    scan_data = results[scan_file]
+                    if 'Results' in scan_data:
+                        for result in scan_data['Results']:
+                            if 'Vulnerabilities' in result:
+                                critical_count = sum(1 for v in result['Vulnerabilities'] if v.get('Severity') == 'CRITICAL')
+                                high_count = sum(1 for v in result['Vulnerabilities'] if v.get('Severity') == 'HIGH')
+                                medium_count = sum(1 for v in result['Vulnerabilities'] if v.get('Severity') == 'MEDIUM')
+                                
+                                metrics.append(f'container_vulnerabilities{{tier="{tier}",severity="critical"}} {critical_count}')
+                                metrics.append(f'container_vulnerabilities{{tier="{tier}",severity="high"}} {high_count}')
+                                metrics.append(f'container_vulnerabilities{{tier="{tier}",severity="medium"}} {medium_count}')
+            
+            # SEBI compliance metrics
+            if 'sebi-compliance.json' in results:
+                compliance_data = results['sebi-compliance.json']
+                overall_score = compliance_data.get('compliance_score', 0)
+                metrics.append(f'sebi_compliance_score {overall_score}')
+                
+                for tier in ['shared', 'premium']:
+                    tier_score = compliance_data.get('tier_compliance', {}).get(tier, {}).get('score', 0)
+                    metrics.append(f'sebi_compliance_score{{tier="{tier}"}} {tier_score}')
+            
+            # Code security metrics
+            if 'bandit-results.json' in results:
+                bandit_data = results['bandit-results.json']
+                if 'metrics' in bandit_data:
+                    severity_counts = bandit_data['metrics'].get('_totals', {})
+                    for severity, count in severity_counts.items():
+                        if severity.upper() in ['HIGH', 'MEDIUM', 'LOW']:
+                            metrics.append(f'code_security_issues{{severity="{severity.lower()}"}} {count}')
+            
+            # Send metrics to Prometheus
+            if metrics:
+                metrics_text = '\n'.join(metrics)
+                response = requests.post(
+                    f'{monitoring_url}/metrics/job/security-scan',
+                    data=metrics_text,
+                    headers={'Content-Type': 'text/plain'}
+                )
+                
+                if response.status_code == 200:
+                    print("Security metrics uploaded successfully")
+                else:
+                    print(f"Failed to upload metrics: {response.status_code}")
+        
+        except Exception as e:
+            print(f"Error uploading security metrics: {e}")
+    
+    if __name__ == '__main__':
+        upload_metrics()
+  
+  # SEBI compliance check script
+  sebi-compliance-check.py: |
+    #!/usr/bin/env python3
+    import sys
+    import os
+    sys.path.append('/scripts')
+    
+    # Import and run the SEBI compliance framework
+    try:
+        import subprocess
+        result = subprocess.run(['python3', '/scripts/sebi-compliance-framework.py'], 
+                              capture_output=True, text=True, timeout=300)
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        sys.exit(result.returncode)
+    except Exception as e:
+        print(f"Error running SEBI compliance check: {e}", file=sys.stderr)
+        sys.exit(1)
+  
+  # Penetration testing script
+  run-penetration-tests.py: |
+    #!/usr/bin/env python3
+    import sys
+    import os
+    sys.path.append('/scripts')
+    
+    # Import and run penetration testing
+    try:
+        import subprocess
+        result = subprocess.run(['python3', '/scripts/penetration-testing.py'], 
+                              capture_output=True, text=True, timeout=600)
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        sys.exit(result.returncode)
+    except Exception as e:
+        print(f"Error running penetration tests: {e}", file=sys.stderr)
+        sys.exit(1)
+  
+  # Security audit report generator
+  generate-security-audit.py: |
+    #!/usr/bin/env python3
+    import json
+    import os
+    from datetime import datetime
+    
+    def generate_audit_report():
+        try:
+            # Collect all security data
+            audit_data = {
+                'timestamp': datetime.utcnow().isoformat(),
+                'audit_version': '1.0.0',
+                'sections': {}
+            }
+            
+            # Container security
+            container_results = {}
+            for tier in ['shared', 'premium']:
+                scan_file = f'/tmp/{tier}-scan.json'
+                if os.path.exists(scan_file):
+                    with open(scan_file, 'r') as f:
+                        container_results[tier] = json.load(f)
+            
+            audit_data['sections']['container_security'] = container_results
+            
+            # SEBI compliance
+            compliance_file = '/tmp/sebi-compliance.json'
+            if os.path.exists(compliance_file):
+                with open(compliance_file, 'r') as f:
+                    audit_data['sections']['sebi_compliance'] = json.load(f)
+            
+            # Penetration testing
+            pentest_file = '/tmp/penetration-test-results.json'
+            if os.path.exists(pentest_file):
+                with open(pentest_file, 'r') as f:
+                    audit_data['sections']['penetration_testing'] = json.load(f)
+            
+            # Code security
+            code_security = {}
+            for tool in ['bandit', 'safety']:
+                result_file = f'/tmp/{tool}-results.json'
+                if os.path.exists(result_file):
+                    with open(result_file, 'r') as f:
+                        code_security[tool] = json.load(f)
+            
+            audit_data['sections']['code_security'] = code_security
+            
+            # Infrastructure security
+            infra_file = '/tmp/checkov-results.json'
+            if os.path.exists(infra_file):
+                with open(infra_file, 'r') as f:
+                    audit_data['sections']['infrastructure_security'] = json.load(f)
+            
+            # Generate summary
+            audit_data['summary'] = {
+                'total_vulnerabilities': 0,
+                'critical_vulnerabilities': 0,
+                'high_vulnerabilities': 0,
+                'compliance_score': 0,
+                'security_rating': 'UNKNOWN'
+            }
+            
+            # Calculate summary metrics
+            if 'sebi_compliance' in audit_data['sections']:
+                compliance_data = audit_data['sections']['sebi_compliance']
+                audit_data['summary']['compliance_score'] = compliance_data.get('compliance_score', 0)
+            
+            # Count vulnerabilities from all sources
+            total_critical = 0
+            total_high = 0
+            total_vulnerabilities = 0
+            
+            # Container vulnerabilities
+            for tier_data in container_results.values():
+                if 'Results' in tier_data:
+                    for result in tier_data['Results']:
+                        if 'Vulnerabilities' in result:
+                            for vuln in result['Vulnerabilities']:
+                                total_vulnerabilities += 1
+                                if vuln.get('Severity') == 'CRITICAL':
+                                    total_critical += 1
+                                elif vuln.get('Severity') == 'HIGH':
+                                    total_high += 1
+            
+            audit_data['summary']['total_vulnerabilities'] = total_vulnerabilities
+            audit_data['summary']['critical_vulnerabilities'] = total_critical
+            audit_data['summary']['high_vulnerabilities'] = total_high
+            
+            # Calculate security rating
+            if total_critical > 0:
+                audit_data['summary']['security_rating'] = 'CRITICAL'
+            elif total_high > 5:
+                audit_data['summary']['security_rating'] = 'HIGH_RISK'
+            elif total_high > 0:
+                audit_data['summary']['security_rating'] = 'MEDIUM_RISK'
+            elif audit_data['summary']['compliance_score'] < 95:
+                audit_data['summary']['security_rating'] = 'COMPLIANCE_RISK'
+            else:
+                audit_data['summary']['security_rating'] = 'LOW_RISK'
+            
+            # Save audit report
+            with open('/tmp/security-audit-report.json', 'w') as f:
+                json.dump(audit_data, f, indent=2)
+            
+            print(json.dumps(audit_data['summary'], indent=2))
+            
+            # Return appropriate exit code
+            if audit_data['summary']['security_rating'] in ['CRITICAL', 'HIGH_RISK']:
+                return 2
+            elif audit_data['summary']['security_rating'] in ['MEDIUM_RISK', 'COMPLIANCE_RISK']:
+                return 1
+            else:
+                return 0
+        
+        except Exception as e:
+            print(f"Error generating security audit: {e}")
+            return 3
+    
+    if __name__ == '__main__':
+        exit(generate_audit_report())
+  
+  # Security alert handler
+  handle-security-alert.py: |
+    #!/usr/bin/env python3
+    import json
+    import os
+    import requests
+    from datetime import datetime
+    
+    def send_security_alert(severity, message, details=None):
+        try:
+            alert_data = {
+                'timestamp': datetime.utcnow().isoformat(),
+                'severity': severity,
+                'service': 'TradeMate Security',
+                'message': message,
+                'details': details or {},
+                'environment': 'production',
+                'tier': 'all'
+            }
+            
+            # Send to Slack webhook
+            slack_webhook = os.getenv('SLACK_SECURITY_WEBHOOK')
+            if slack_webhook:
+                slack_data = {
+                    'channel': '#security-alerts',
+                    'username': 'TradeMate Security',
+                    'icon_emoji': ':warning:' if severity == 'HIGH' else ':rotating_light:',
+                    'text': f'*{severity} Security Alert*: {message}',
+                    'attachments': [{
+                        'color': 'danger' if severity == 'CRITICAL' else 'warning',
+                        'fields': [{
+                            'title': 'Details',
+                            'value': json.dumps(details, indent=2) if details else 'No additional details',
+                            'short': False
+                        }],
+                        'footer': 'TradeMate Security Monitoring',
+                        'ts': int(datetime.utcnow().timestamp())
+                    }]
+                }
+                
+                response = requests.post(slack_webhook, json=slack_data, timeout=10)
+                if response.status_code == 200:
+                    print("Security alert sent to Slack")
+                else:
+                    print(f"Failed to send Slack alert: {response.status_code}")
+            
+            # Send to PagerDuty for critical alerts
+            if severity == 'CRITICAL':
+                pagerduty_key = os.getenv('PAGERDUTY_SECURITY_KEY')
+                if pagerduty_key:
+                    pd_data = {
+                        'routing_key': pagerduty_key,
+                        'event_action': 'trigger',
+                        'payload': {
+                            'summary': f'TradeMate Critical Security Alert: {message}',
+                            'source': 'TradeMate Security Monitor',
+                            'severity': 'critical',
+                            'component': 'security',
+                            'custom_details': details
+                        }
+                    }
+                    
+                    response = requests.post(
+                        'https://events.pagerduty.com/v2/enqueue',
+                        json=pd_data,
+                        timeout=10
+                    )
+                    
+                    if response.status_code == 202:
+                        print("Critical alert sent to PagerDuty")
+                    else:
+                        print(f"Failed to send PagerDuty alert: {response.status_code}")
+        
+        except Exception as e:
+            print(f"Error sending security alert: {e}")
+    
+    def main():
+        import sys
+        if len(sys.argv) < 3:
+            print("Usage: handle-security-alert.py <severity> <message> [details_json]")
+            sys.exit(1)
+        
+        severity = sys.argv[1]
+        message = sys.argv[2]
+        details = None
+        
+        if len(sys.argv) > 3:
+            try:
+                details = json.loads(sys.argv[3])
+            except json.JSONDecodeError:
+                details = {'raw_details': sys.argv[3]}
+        
+        send_security_alert(severity, message, details)
+    
+    if __name__ == '__main__':
+        main()

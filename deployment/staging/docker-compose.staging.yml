@@ -1,0 +1,244 @@
+# GridWorks Staging Environment
+# Docker Compose configuration for beta testing and user acceptance testing
+
+version: '3.8'
+
+services:
+  # Main Application
+  gridworks-app:
+    build:
+      context: ../../
+      dockerfile: Dockerfile.staging
+    container_name: gridworks-staging-app
+    ports:
+      - "8001:8000"  # Different port for staging
+    environment:
+      - ENVIRONMENT=staging
+      - DATABASE_URL=postgresql://gridworks:staging_password@db:5432/gridworks_staging
+      - REDIS_URL=redis://redis:6379/1
+      - API_BASE_URL=https://staging-api.gridworks.ai
+      - FRONTEND_URL=https://staging.gridworks.ai
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - WEBSOCKET_URL=wss://staging-ws.gridworks.ai
+      - MONITORING_ENABLED=true
+      - BETA_TESTING_ENABLED=true
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+    volumes:
+      - app_logs:/app/logs
+      - chart_data:/app/data/charts
+    depends_on:
+      - db
+      - redis
+    networks:
+      - gridworks-staging
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Database
+  db:
+    image: postgres:15
+    container_name: gridworks-staging-db
+    environment:
+      - POSTGRES_DB=gridworks_staging
+      - POSTGRES_USER=gridworks
+      - POSTGRES_PASSWORD=staging_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5433:5432"  # Different port for staging
+    networks:
+      - gridworks-staging
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gridworks"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: gridworks-staging-redis
+    ports:
+      - "6380:6379"  # Different port for staging
+    volumes:
+      - redis_data:/data
+    networks:
+      - gridworks-staging
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # WebSocket Server
+  websocket:
+    build:
+      context: ../../
+      dockerfile: Dockerfile.websocket
+    container_name: gridworks-staging-ws
+    ports:
+      - "8002:8080"
+    environment:
+      - ENVIRONMENT=staging
+      - REDIS_URL=redis://redis:6379/1
+      - DATABASE_URL=postgresql://gridworks:staging_password@db:5432/gridworks_staging
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+    depends_on:
+      - redis
+      - db
+    networks:
+      - gridworks-staging
+    restart: unless-stopped
+
+  # Frontend (React)
+  frontend:
+    build:
+      context: ../../app/frontend/react
+      dockerfile: Dockerfile.staging
+    container_name: gridworks-staging-frontend
+    ports:
+      - "3001:3000"  # Different port for staging
+    environment:
+      - REACT_APP_API_URL=https://staging-api.gridworks.ai
+      - REACT_APP_WS_URL=wss://staging-ws.gridworks.ai
+      - REACT_APP_ENVIRONMENT=staging
+      - REACT_APP_BETA_TESTING=true
+      - REACT_APP_ANALYTICS_ENABLED=true
+    volumes:
+      - frontend_build:/app/build
+    networks:
+      - gridworks-staging
+    restart: unless-stopped
+
+  # Nginx Load Balancer
+  nginx:
+    image: nginx:alpine
+    container_name: gridworks-staging-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.staging.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+      - frontend_build:/usr/share/nginx/html
+    depends_on:
+      - gridworks-app
+      - frontend
+      - websocket
+    networks:
+      - gridworks-staging
+    restart: unless-stopped
+
+  # Monitoring (Prometheus + Grafana)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: gridworks-staging-prometheus
+    ports:
+      - "9091:9090"  # Different port for staging
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - gridworks-staging
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: gridworks-staging-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=staging_admin
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - gridworks-staging
+    restart: unless-stopped
+
+  # Analytics & Feedback Collector
+  analytics:
+    build:
+      context: ../../
+      dockerfile: Dockerfile.analytics
+    container_name: gridworks-staging-analytics
+    environment:
+      - ENVIRONMENT=staging
+      - DATABASE_URL=postgresql://gridworks:staging_password@db:5432/gridworks_staging
+      - REDIS_URL=redis://redis:6379/2
+    depends_on:
+      - db
+      - redis
+    networks:
+      - gridworks-staging
+    restart: unless-stopped
+
+  # Testing Data Generator (for staging)
+  data-generator:
+    build:
+      context: ../../testing
+      dockerfile: Dockerfile.data-generator
+    container_name: gridworks-staging-data-gen
+    environment:
+      - ENVIRONMENT=staging
+      - API_URL=http://gridworks-app:8000
+      - GENERATE_INTERVAL=60  # Generate test data every 60 seconds
+    depends_on:
+      - gridworks-app
+    networks:
+      - gridworks-staging
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  app_logs:
+    driver: local
+  chart_data:
+    driver: local
+  frontend_build:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  gridworks-staging:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Health checks for the entire stack
+healthcheck:
+  test: [
+    "CMD-SHELL",
+    "curl -f http://localhost/health && curl -f http://localhost:8001/health"
+  ]
+  interval: 60s
+  timeout: 30s
+  retries: 3
+  start_period: 120s

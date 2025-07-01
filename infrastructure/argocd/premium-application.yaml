@@ -1,0 +1,141 @@
+# ArgoCD Application for Premium Tier (Elite + Black)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gridworks-premium-production
+  namespace: argocd
+  labels:
+    tier: premium
+    app.kubernetes.io/name: gridworks-premium
+  annotations:
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+spec:
+  project: gridworks-production
+  
+  source:
+    repoURL: https://github.com/raosunjoy/TradeMate
+    targetRevision: master
+    path: infrastructure/k8s/premium-tier
+    helm:
+      valueFiles:
+        - values-production.yaml
+      parameters:
+        - name: image.repository
+          value: ghcr.io/raosunjoy/gridworks/premium-api
+        - name: image.tag
+          value: latest
+        - name: replicaCount
+          value: "5"
+        - name: autoscaling.enabled
+          value: "true"
+        - name: autoscaling.minReplicas
+          value: "3"
+        - name: autoscaling.maxReplicas
+          value: "20"
+        - name: resources.requests.cpu
+          value: "1000m"
+        - name: resources.requests.memory
+          value: "1Gi"
+        - name: resources.limits.cpu
+          value: "2000m"
+        - name: resources.limits.memory
+          value: "2Gi"
+        - name: service.type
+          value: "ClusterIP"
+        - name: ingress.enabled
+          value: "true"
+        - name: ingress.className
+          value: "nginx"
+        - name: ingress.hosts[0].host
+          value: "premium.gridworks.ai"
+        - name: ingress.hosts[0].paths[0].path
+          value: "/"
+        - name: ingress.hosts[0].paths[0].pathType
+          value: "Prefix"
+        - name: env.TIER_MODE
+          value: "PREMIUM"
+        - name: env.PERFORMANCE_TARGET
+          value: "50ms"
+        - name: env.COLOCATION_ENABLED
+          value: "true"
+        - name: env.INSTITUTIONAL_FEATURES
+          value: "true"
+        - name: nodeSelector.node-type
+          value: "premium-workload"
+        - name: nodeSelector.zone
+          value: "mumbai-colocation"
+        - name: tolerations[0].key
+          value: "premium-only"
+        - name: tolerations[0].operator
+          value: "Equal"
+        - name: tolerations[0].value
+          value: "true"
+        - name: tolerations[0].effect
+          value: "NoSchedule"
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: premium
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - ServerSideApply=true
+    retry:
+      limit: 3  # More conservative for premium
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+  
+  revisionHistoryLimit: 5  # More history for premium
+  
+  # Stricter health checks for premium tier
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /spec/minReplicas
+        - /spec/maxReplicas
+  
+  # Premium-specific operation settings
+  operation:
+    sync:
+      syncStrategy:
+        hook:
+          force: false  # More cautious for premium
+      retry:
+        limit: 3
+        backoff:
+          duration: 10s
+          maxDuration: 5m
+          factor: 2
+      
+  # Custom health checks for premium features
+  health:
+    - group: apps
+      kind: Deployment
+      check: |
+        health_status = {}
+        if obj.status ~= nil then
+          if obj.status.replicas ~= nil and obj.status.readyReplicas ~= nil then
+            if obj.status.replicas == obj.status.readyReplicas then
+              health_status.status = "Healthy"
+              health_status.message = "All premium replicas are ready"
+            else
+              health_status.status = "Progressing"
+              health_status.message = "Premium deployment in progress"
+            end
+          end
+        end
+        return health_status

@@ -1,0 +1,247 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gridworks-api
+  namespace: gridworks-production
+  labels:
+    app: gridworks-api
+    tier: backend
+    version: v1
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: gridworks-api
+  template:
+    metadata:
+      labels:
+        app: gridworks-api
+        tier: backend
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: gridworks-service-account
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: gridworks-api
+        image: gridworks/api:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: secret-key
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: database-url
+        - name: REDIS_URL
+          value: "redis://gridworks-redis:6379/0"
+        - name: WHATSAPP_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: whatsapp-access-token
+        - name: WHATSAPP_PHONE_NUMBER_ID
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: whatsapp-phone-number-id
+        - name: WHATSAPP_WEBHOOK_VERIFY_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: whatsapp-webhook-verify-token
+        - name: WHATSAPP_APP_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: whatsapp-app-secret
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: openai-api-key
+        - name: STRIPE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: stripe-secret-key
+        - name: STRIPE_WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: stripe-webhook-secret
+        - name: SETU_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: setu-client-id
+        - name: SETU_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: setu-client-secret
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: encryption-key
+        - name: AUDIT_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gridworks-secrets
+              key: audit-encryption-key
+        - name: CELERY_BROKER_URL
+          value: "redis://gridworks-redis:6379/1"
+        - name: CELERY_RESULT_BACKEND
+          value: "redis://gridworks-redis:6379/2"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: app-logs
+          mountPath: /app/logs
+        - name: app-uploads
+          mountPath: /app/uploads
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: app-logs
+        emptyDir: {}
+      - name: app-uploads
+        persistentVolumeClaim:
+          claimName: gridworks-uploads-pvc
+      tolerations:
+      - key: "app"
+        operator: "Equal"
+        value: "gridworks"
+        effect: "NoSchedule"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - gridworks-api
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gridworks-api-service
+  namespace: gridworks-production
+  labels:
+    app: gridworks-api
+spec:
+  selector:
+    app: gridworks-api
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8000
+    protocol: TCP
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gridworks-uploads-pvc
+  namespace: gridworks-production
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: fast-ssd
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gridworks-api-hpa
+  namespace: gridworks-production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gridworks-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60

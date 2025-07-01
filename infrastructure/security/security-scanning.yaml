@@ -1,0 +1,166 @@
+# TradeMate Security Scanning and Vulnerability Assessment
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: security-scan-config
+  namespace: security
+data:
+  # Trivy configuration for container vulnerability scanning
+  trivy-config.yaml: |
+    format: json
+    output: /tmp/trivy-results.json
+    severity: CRITICAL,HIGH,MEDIUM
+    ignore-unfixed: false
+    security-checks: vuln,config
+    
+  # OWASP ZAP configuration for API security testing
+  zap-baseline.conf: |
+    # ZAP Baseline Scan Configuration
+    -config api.addrs.addr.name=*
+    -config api.addrs.addr.regex=true
+    -config api.disablekey=true
+    -config spider.maxDepth=5
+    -config replacer.full_list(0).description=auth_header
+    -config replacer.full_list(0).enabled=true
+    -config replacer.full_list(0).matchtype=REQ_HEADER
+    -config replacer.full_list(0).matchstr=Authorization
+    -config replacer.full_list(0).replacement=Bearer 
+    
+  # Bandit configuration for Python security analysis
+  bandit.yaml: |
+    tests: [B101,B102,B103,B104,B105,B106,B107,B108,B110,B112,B201,B301,B302,B303,B304,B305,B306,B307,B308,B309,B310,B311,B312,B313,B314,B315,B316,B317,B318,B319,B320,B321,B322,B323,B324,B325,B401,B402,B403,B404,B405,B406,B407,B408,B409,B410,B411,B412,B413,B501,B502,B503,B504,B505,B506,B507,B601,B602,B603,B604,B605,B606,B607,B608,B609,B610,B611,B701,B702,B703]
+    skips: []
+    
+  # Safety configuration for dependency vulnerability scanning
+  safety-config.json: |
+    {
+      "ignore": [],
+      "full-report": true,
+      "short-report": false,
+      "output": "json"
+    }
+---
+# Security Scanning CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: security-scan-job
+  namespace: security
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: security-scanner
+          containers:
+          - name: security-scanner
+            image: aquasec/trivy:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Starting TradeMate Security Scan Pipeline"
+              
+              # Container Vulnerability Scanning
+              echo "=== Container Vulnerability Scanning ==="
+              trivy image --format json --output /tmp/shared-scan.json ghcr.io/raosunjoy/gridworks/shared-api:latest
+              trivy image --format json --output /tmp/premium-scan.json ghcr.io/raosunjoy/gridworks/premium-api:latest
+              
+              # Python Security Analysis
+              echo "=== Python Security Analysis ==="
+              git clone https://github.com/raosunjoy/TradeMate.git /tmp/code
+              cd /tmp/code
+              
+              bandit -r app/ -f json -o /tmp/bandit-results.json || true
+              safety check --json --output /tmp/safety-results.json || true
+              
+              # API Security Testing
+              echo "=== API Security Testing ==="
+              zap-baseline.py -t https://api.gridworks.ai -J /tmp/zap-shared-results.json || true
+              zap-baseline.py -t https://premium.gridworks.ai -J /tmp/zap-premium-results.json || true
+              
+              # Infrastructure Security Scan
+              echo "=== Infrastructure Security Scan ==="
+              checkov -d /tmp/code/infrastructure --framework terraform --output json --output-file /tmp/checkov-results.json || true
+              
+              # Compliance Validation
+              echo "=== SEBI Compliance Validation ==="
+              python3 /scripts/sebi-compliance-check.py > /tmp/sebi-compliance.json
+              
+              # Upload results to monitoring
+              echo "=== Uploading Results ==="
+              python3 /scripts/upload-security-metrics.py
+              
+              echo "Security scan completed"
+            volumeMounts:
+            - name: scan-results
+              mountPath: /tmp
+            - name: scripts
+              mountPath: /scripts
+            resources:
+              requests:
+                memory: "1Gi"
+                cpu: "500m"
+              limits:
+                memory: "2Gi"
+                cpu: "1000m"
+          volumes:
+          - name: scan-results
+            persistentVolumeClaim:
+              claimName: security-scan-storage
+          - name: scripts
+            configMap:
+              name: security-scripts
+              defaultMode: 0755
+          restartPolicy: OnFailure
+---
+# Security Scanner Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: security-scanner
+  namespace: security
+---
+# Role for security scanning
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: security
+  name: security-scanner
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "secrets"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list"]
+---
+# RoleBinding for security scanner
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: security-scanner
+  namespace: security
+subjects:
+- kind: ServiceAccount
+  name: security-scanner
+  namespace: security
+roleRef:
+  kind: Role
+  name: security-scanner
+  apiGroup: rbac.authorization.k8s.io
+---
+# PVC for scan results storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: security-scan-storage
+  namespace: security
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: gp3
