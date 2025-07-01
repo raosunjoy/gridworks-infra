@@ -1,0 +1,66 @@
+{
+  "name": "@gridworks/b2b-sdk",
+  "version": "1.0.0",
+  "description": "GridWorks B2B Infrastructure Services SDK for TypeScript/JavaScript",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "docs": "typedoc src",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "gridworks",
+    "b2b",
+    "financial-services",
+    "trading",
+    "banking",
+    "ai-suite",
+    "anonymous-services",
+    "sdk",
+    "typescript"
+  ],
+  "author": "GridWorks Infrastructure Services",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/raosunjoy/gridworks-infra.git",
+    "directory": "shared-infrastructure/sdks/typescript"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "ws": "^8.14.2",
+    "crypto-js": "^4.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.9.0",
+    "@types/jest": "^29.5.8",
+    "@types/ws": "^8.5.9",
+    "@types/crypto-js": "^4.2.1",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.2.2",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "eslint": "^8.54.0",
+    "@typescript-eslint/eslint-plugin": "^6.12.0",
+    "@typescript-eslint/parser": "^6.12.0",
+    "typedoc": "^0.25.4"
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

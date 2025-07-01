@@ -1,0 +1,878 @@
+openapi: 3.0.3
+info:
+  title: GridWorks B2B Infrastructure Services API
+  description: |
+    Complete REST API for GridWorks B2B Infrastructure Services
+    
+    This API provides access to:
+    - AI Suite: Multi-language support, market intelligence, content moderation
+    - Anonymous Services: Zero-knowledge proofs, anonymous portfolio management  
+    - Trading-as-a-Service: Multi-exchange connectivity, risk management
+    - Banking-as-a-Service: Payment processing, account management, compliance
+    
+    ## Authentication
+    
+    All API requests require authentication using either:
+    - **API Key**: Include `X-API-Key` header
+    - **JWT Token**: Include `Authorization: Bearer <token>` header
+    
+    ## Rate Limiting
+    
+    Rate limits vary by service tier:
+    - Starter: 1,000 requests/hour
+    - Professional: 10,000 requests/hour  
+    - Enterprise: 100,000 requests/hour
+    - Custom: Negotiated limits
+    
+    ## Error Handling
+    
+    The API uses standard HTTP status codes and returns error details in JSON format.
+    
+  version: 1.0.0
+  contact:
+    name: GridWorks API Support
+    email: api-support@gridworks.com
+    url: https://docs.gridworks.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.gridworks.com
+    description: Production server
+  - url: https://api-staging.gridworks.com
+    description: Staging server
+  - url: https://api-dev.gridworks.com
+    description: Development server
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+
+paths:
+  # Health Check
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check
+      description: Check API health status
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  # Client Info
+  /api/v1/client/info:
+    get:
+      tags:
+        - Client
+      summary: Get client information
+      description: Retrieve current client details and subscription info
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Client information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # AI Suite - Support
+  /api/v1/ai-suite/support:
+    post:
+      tags:
+        - AI Suite
+      summary: Get AI support
+      description: Get AI-powered support in multiple languages
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupportRequest'
+      responses:
+        '200':
+          description: Support response
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SupportResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+
+  # AI Suite - WhatsApp Support
+  /api/v1/ai-suite/support/whatsapp:
+    post:
+      tags:
+        - AI Suite
+      summary: WhatsApp Business support
+      description: Get AI support via WhatsApp Business integration
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+                - phoneNumber
+              properties:
+                message:
+                  type: string
+                  description: Support message
+                phoneNumber:
+                  type: string
+                  description: WhatsApp phone number
+                  example: "+919876543210"
+                context:
+                  type: object
+                  description: Additional context
+      responses:
+        '200':
+          description: WhatsApp support response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+
+  # AI Suite - Intelligence
+  /api/v1/ai-suite/intelligence:
+    post:
+      tags:
+        - AI Suite
+      summary: Get market intelligence
+      description: Get AI-powered market analysis and correlation insights
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntelligenceRequest'
+      responses:
+        '200':
+          description: Intelligence analysis
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/IntelligenceResponse'
+
+  # Anonymous Services - Portfolio Verification
+  /api/v1/anonymous/portfolio/verify:
+    post:
+      tags:
+        - Anonymous Services
+      summary: Verify anonymous portfolio
+      description: Verify portfolio using zero-knowledge proofs while maintaining privacy
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnonymousPortfolioRequest'
+      responses:
+        '200':
+          description: Portfolio verification result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AnonymousPortfolioResponse'
+
+  # Anonymous Services - ZK Proof Generation
+  /api/v1/anonymous/zk-proof/generate:
+    post:
+      tags:
+        - Anonymous Services
+      summary: Generate zero-knowledge proof
+      description: Generate cryptographic proof without revealing private information
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ZKProofRequest'
+      responses:
+        '200':
+          description: Generated ZK proof
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ZKProofResponse'
+
+  # Trading - Orders
+  /api/v1/trading/orders:
+    post:
+      tags:
+        - Trading
+      summary: Place trading order
+      description: Place buy/sell order on supported exchanges
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderRequest'
+      responses:
+        '200':
+          description: Order placed successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/OrderResponse'
+    get:
+      tags:
+        - Trading
+      summary: Get order history
+      description: Retrieve trading order history with filtering
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, filled, cancelled, rejected]
+        - name: symbol
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 1000
+      responses:
+        '200':
+          description: Order history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponse'
+
+  # Trading - Specific Order
+  /api/v1/trading/orders/{orderId}:
+    get:
+      tags:
+        - Trading
+      summary: Get order details
+      description: Get specific order details and status
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/OrderResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    delete:
+      tags:
+        - Trading
+      summary: Cancel order
+      description: Cancel pending trading order
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Order cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+
+  # Banking - Payments
+  /api/v1/banking/payments:
+    post:
+      tags:
+        - Banking
+      summary: Process payment
+      description: Process payment between accounts
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentRequest'
+      responses:
+        '200':
+          description: Payment processed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PaymentResponse'
+
+  # Banking - Accounts
+  /api/v1/banking/accounts:
+    post:
+      tags:
+        - Banking
+      summary: Create account
+      description: Create new bank account
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountRequest'
+      responses:
+        '200':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AccountResponse'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    APIResponse:
+      type: object
+      required:
+        - success
+        - timestamp
+        - requestId
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+        error:
+          type: string
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        requestId:
+          type: string
+
+    PaginatedResponse:
+      allOf:
+        - $ref: '#/components/schemas/APIResponse'
+        - type: object
+          properties:
+            pagination:
+              type: object
+              properties:
+                page:
+                  type: integer
+                limit:
+                  type: integer
+                total:
+                  type: integer
+                totalPages:
+                  type: integer
+                hasNext:
+                  type: boolean
+                hasPrev:
+                  type: boolean
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "healthy"
+        timestamp:
+          type: string
+          format: date-time
+        services:
+          type: object
+          properties:
+            aiSuite:
+              type: boolean
+            anonymous:
+              type: boolean
+            trading:
+              type: boolean
+            banking:
+              type: boolean
+
+    # AI Suite Schemas
+    SupportRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Support request message
+        language:
+          type: string
+          default: "en"
+          description: Language code (en, hi, ta, etc.)
+        context:
+          type: object
+          description: Additional context
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+          default: medium
+        channel:
+          type: string
+          enum: [whatsapp, api, web, mobile]
+
+    SupportResponse:
+      type: object
+      properties:
+        response:
+          type: string
+        language:
+          type: string
+        confidence:
+          type: number
+          format: float
+        responseTime:
+          type: number
+          format: float
+        escalated:
+          type: boolean
+        suggestions:
+          type: array
+          items:
+            type: string
+
+    IntelligenceRequest:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum: [market_correlation, morning_pulse, sector_analysis, custom]
+        parameters:
+          type: object
+        deliveryFormat:
+          type: string
+          enum: [text, voice, pdf, whatsapp]
+          default: text
+
+    IntelligenceResponse:
+      type: object
+      properties:
+        analysis:
+          type: object
+          properties:
+            summary:
+              type: string
+            keyPoints:
+              type: array
+              items:
+                type: string
+            recommendations:
+              type: array
+              items:
+                type: object
+
+    # Anonymous Services Schemas  
+    AnonymousPortfolioRequest:
+      type: object
+      required:
+        - portfolioData
+        - privacyLevel
+      properties:
+        portfolioData:
+          type: object
+          properties:
+            totalValue:
+              type: number
+            assetClasses:
+              type: array
+              items:
+                type: object
+            riskProfile:
+              type: string
+              enum: [conservative, moderate, aggressive]
+        privacyLevel:
+          type: string
+          enum: [onyx, obsidian, void]
+
+    AnonymousPortfolioResponse:
+      type: object
+      properties:
+        verificationResult:
+          type: object
+        zkProof:
+          $ref: '#/components/schemas/ZKProofResponse'
+        anonymousId:
+          type: string
+        validationTimestamp:
+          type: string
+          format: date-time
+
+    ZKProofRequest:
+      type: object
+      required:
+        - statement
+        - witness
+        - publicInputs
+      properties:
+        statement:
+          type: string
+        witness:
+          type: object
+        publicInputs:
+          type: array
+          items:
+            type: object
+        proofType:
+          type: string
+          enum: [portfolio_verification, identity_verification, transaction_verification]
+
+    ZKProofResponse:
+      type: object
+      properties:
+        proof:
+          type: string
+        verificationKey:
+          type: string
+        publicSignals:
+          type: array
+          items:
+            type: object
+        isValid:
+          type: boolean
+        generatedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+
+    # Trading Schemas
+    OrderRequest:
+      type: object
+      required:
+        - symbol
+        - side
+        - quantity
+        - orderType
+      properties:
+        symbol:
+          type: string
+          example: "RELIANCE"
+        side:
+          type: string
+          enum: [buy, sell]
+        quantity:
+          type: number
+          format: float
+        orderType:
+          type: string
+          enum: [market, limit, stop, stop_limit]
+        price:
+          type: number
+          format: float
+        exchange:
+          type: string
+          example: "NSE"
+
+    OrderResponse:
+      type: object
+      properties:
+        orderId:
+          type: string
+        status:
+          type: string
+          enum: [pending, filled, partially_filled, cancelled, rejected]
+        symbol:
+          type: string
+        side:
+          type: string
+        quantity:
+          type: number
+        filledQuantity:
+          type: number
+        averagePrice:
+          type: number
+        timestamp:
+          type: string
+          format: date-time
+
+    # Banking Schemas
+    PaymentRequest:
+      type: object
+      required:
+        - amount
+        - currency
+        - fromAccount
+        - toAccount
+        - purpose
+      properties:
+        amount:
+          type: number
+          format: float
+        currency:
+          type: string
+          example: "INR"
+        fromAccount:
+          type: string
+        toAccount:
+          type: string
+        paymentMethod:
+          type: string
+          enum: [bank_transfer, wire, ach, card, crypto]
+        purpose:
+          type: string
+
+    PaymentResponse:
+      type: object
+      properties:
+        paymentId:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed, cancelled]
+        amount:
+          type: number
+        currency:
+          type: string
+        fees:
+          type: object
+        timeline:
+          type: object
+
+    AccountRequest:
+      type: object
+      required:
+        - accountType
+        - currency
+        - clientId
+        - accountName
+        - purpose
+      properties:
+        accountType:
+          type: string
+          enum: [checking, savings, escrow, virtual, multi_currency]
+        currency:
+          type: string
+        clientId:
+          type: string
+        accountName:
+          type: string
+        purpose:
+          type: string
+
+    AccountResponse:
+      type: object
+      properties:
+        accountId:
+          type: string
+        accountNumber:
+          type: string
+        status:
+          type: string
+        balance:
+          type: object
+        currency:
+          type: string
+        accountType:
+          type: string
+
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+        field:
+          type: string
+
+  responses:
+    UnauthorizedError:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/APIResponse'
+              - type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Authentication required"
+
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/APIResponse'
+              - type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Validation failed"
+                  details:
+                    $ref: '#/components/schemas/Error'
+
+    RateLimitError:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/APIResponse'
+              - type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Rate limit exceeded"
+      headers:
+        Retry-After:
+          description: Number of seconds to wait before retrying
+          schema:
+            type: integer
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/APIResponse'
+              - type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Resource not found"
+
+tags:
+  - name: System
+    description: System health and status endpoints
+  - name: Client
+    description: Client information and management
+  - name: AI Suite
+    description: AI-powered services for financial institutions
+  - name: Anonymous Services
+    description: Zero-knowledge proofs and anonymous portfolio management
+  - name: Trading
+    description: Multi-exchange trading services with risk management
+  - name: Banking
+    description: Digital banking infrastructure and payment processing
