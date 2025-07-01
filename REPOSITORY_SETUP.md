@@ -160,7 +160,7 @@ This repository contains the **GridWorks Infra** platform - a comprehensive B2B 
 **Business Lead**: CEO/Founder  
 **Repository Manager**: Technical Co-founder
 
-**GitHub Repository**: https://github.com/raosunjoy/gridworks-infra (to be created)
+**GitHub Repository**: https://github.com/raosunjoy/gridworks-infra ✅ **CREATED AND ACTIVE**
 
 ---
 
